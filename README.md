@@ -81,4 +81,4 @@ The web output is written to `dist/` and can be previewed with `npm run preview`
 
 ## Disclaimer
 
-This project was vibe coded with substantial AI assistance. Review and test the code carefully before relying on it for important workflows or data. It is provided as-is, without any guarantee that it is bug-free, secure, or suitable for a particular purpose.
+This project was entirely vibe coded. Review and test the code carefully before relying on it for important workflows or data. It is provided as-is, without any guarantee that it is bug-free, secure, or suitable for a particular purpose.
