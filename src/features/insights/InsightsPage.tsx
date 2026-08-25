@@ -220,6 +220,10 @@ export function InsightsPage({ onNavigate }: { onNavigate?: (label: string) => v
   const setTaskStatus = useTaskStore((state) => state.setStatus);
   const startTodayTask = useTodayStore((state) => state.startTask);
   const focusingId = useTodayStore((state) => state.currentTask?.id ?? null);
+  const focusMode = useTodayStore((state) => state.mode);
+  const toggleFocusPause = useTodayStore((state) => state.togglePause);
+  const resumeTodayFocus = useTodayStore((state) => state.resumeFocus);
+  const interruptTodayFocus = useTodayStore((state) => state.interrupt);
   const [period, setPeriod] = useState<Period>("week");
   const [anchor, setAnchor] = useState(localDateKey);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -305,6 +309,11 @@ export function InsightsPage({ onNavigate }: { onNavigate?: (label: string) => v
     .sort((a, b) => b.date.localeCompare(a.date))[0]?.date ?? localDateKey(range.end);
 
   const startTask = async (task: FlowoTask) => {
+    if (focusingId === task.id) {
+      if (focusMode === "focusing") await toggleFocusPause();
+      else if (focusMode === "paused" || focusMode === "interrupted") await resumeTodayFocus();
+      return;
+    }
     await startTodayTask({
       id: task.id,
       title: task.title,
@@ -466,9 +475,10 @@ export function InsightsPage({ onNavigate }: { onNavigate?: (label: string) => v
         task={selectedTask}
         notes={selectedTask ? notesByTask[selectedTask.id] ?? [] : []}
         entries={entries}
-        focusing={Boolean(selectedTask && focusingId === selectedTask.id)}
+        focusMode={selectedTask && focusingId === selectedTask.id && (focusMode === "focusing" || focusMode === "paused" || focusMode === "interrupted") ? focusMode : null}
         onClose={() => setSelectedTaskId(null)}
         onStart={() => selectedTask && void startTask(selectedTask)}
+        onInterrupt={() => void interruptTodayFocus()}
         onAction={(action) => selectedTask && void taskAction(selectedTask, action)}
         onAddNote={() => selectedTask && openTaskPage(selectedTask, "note")}
         onViewNotes={() => selectedTask && openTaskPage(selectedTask)}

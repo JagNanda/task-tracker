@@ -22,6 +22,7 @@ import {
   Plus,
   Search,
   SwitchCamera,
+  Zap,
   X,
 } from "lucide-react";
 import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useState } from "react";
@@ -40,11 +41,13 @@ import { databaseStatus, useTaskStore } from "./taskStore";
 import { entryMinutes, formatClock, formatDuration, localDateKey, type TimelineActivity, useTimelineStore } from "../timeline/timelineStore";
 import { settingsService } from "../../data/services/settingsService";
 import { RemindersDialog } from "../reminders/RemindersDialog";
+import type { SessionMode } from "../today/types";
 
 export type TaskStatus = "in-progress" | "todo" | "blocked" | "completed" | "cancelled" | "archived";
 type StatusFilter = "active" | "blocked" | "completed" | "cancelled" | "archived";
 type ReminderFilter = "all" | "due-soon" | "has-reminder";
 type SortOption = "Recently Worked On" | "Recently Created" | "Reminder Time" | "Name" | "Time Spent";
+type ActiveFocusMode = Extract<SessionMode, "focusing" | "paused" | "interrupted">;
 
 type TaskReminder = {
   label: string;
@@ -340,7 +343,7 @@ function statusIcon(status: TaskStatus) {
 function TaskRow({
   task,
   selected,
-  focusing,
+  focusMode,
   onSelect,
   onStart,
   onViewNotes,
@@ -348,12 +351,13 @@ function TaskRow({
 }: {
   task: FlowoTask;
   selected: boolean;
-  focusing: boolean;
+  focusMode: ActiveFocusMode | null;
   onSelect: () => void;
   onStart: () => void;
   onViewNotes: () => void;
   onAction: (action: string) => void;
 }) {
+  const focusStateLabel = focusMode === "focusing" ? "Focusing" : focusMode === "paused" ? "Paused" : focusMode === "interrupted" ? "Interrupted" : null;
   const activeActions = ["Edit", "Add Reminder", "Mark Complete", task.status === "blocked" ? "Mark To Do" : "Mark Blocked", "Cancel Task", "Archive"];
   const completedActions = ["Reopen", "Archive"];
   const archivedActions = ["Restore", "Delete Permanently"];
@@ -371,7 +375,7 @@ function TaskRow({
 
   return (
     <div
-      className={`task-row task-row--${task.status} ${selected ? "is-selected" : ""} ${focusing ? "is-focusing" : ""}`}
+      className={`task-row task-row--${task.status} ${selected ? "is-selected" : ""} ${focusMode ? "is-focusing" : ""}`}
       data-task-row
       role="listitem"
       tabIndex={0}
@@ -382,7 +386,7 @@ function TaskRow({
       <button className="task-row__title" type="button" onClick={onSelect}>{task.title}</button>
       <Badge className="task-row__context">{task.context}</Badge>
       <span className="task-row__state">
-        {focusing ? <Badge className="task-focus-badge"><Pause size={11} fill="currentColor" /> Focusing</Badge> : task.status === "blocked" ? <Badge className="task-blocked-badge">Blocked</Badge> : null}
+        {focusMode ? <Badge className={`task-focus-badge task-focus-badge--${focusMode}`}>{focusMode === "interrupted" ? <Zap size={11} fill="currentColor" /> : <Pause size={11} fill="currentColor" />} {focusStateLabel}</Badge> : task.status === "blocked" ? <Badge className="task-blocked-badge">Blocked</Badge> : null}
       </span>
       <span className="task-row__time" title={task.todayMinutes ? `Today ${formatMinutes(task.todayMinutes)}` : "No time tracked today"}>{formatMinutes(task.totalMinutes)}</span>
       <span className={`task-row__reminder ${task.reminder ? "has-reminder" : ""} ${task.reminder?.overdue ? "is-overdue" : ""}`}>
@@ -396,10 +400,10 @@ function TaskRow({
       {(task.status === "in-progress" || task.status === "todo" || task.status === "blocked") ? (
         <IconButton
           className="task-row__play"
-          label={focusing ? `Currently focusing on ${task.title}` : `Start focus on ${task.title}`}
+          label={focusMode === "focusing" ? `Pause focus on ${task.title}` : focusMode ? `Resume focus on ${task.title}` : `Start focus on ${task.title}`}
           onClick={(event) => { event.stopPropagation(); onStart(); }}
         >
-          {focusing ? <Pause size={13} fill="currentColor" /> : <Play size={13} fill="currentColor" />}
+          {focusMode === "focusing" ? <Pause size={13} fill="currentColor" /> : <Play size={13} fill="currentColor" />}
         </IconButton>
       ) : <span className="task-row__play-spacer" />}
       <div className="task-row__more" onClick={(event) => event.stopPropagation()}>
@@ -420,7 +424,8 @@ function TaskSection({
   title,
   tasks,
   selectedId,
-  focusingId,
+  activeFocusId,
+  focusMode,
   onSelect,
   onStart,
   onViewNotes,
@@ -429,7 +434,8 @@ function TaskSection({
   title: string;
   tasks: FlowoTask[];
   selectedId: string | null;
-  focusingId: string | null;
+  activeFocusId: string | null;
+  focusMode: ActiveFocusMode | null;
   onSelect: (task: FlowoTask) => void;
   onStart: (task: FlowoTask) => void;
   onViewNotes: (task: FlowoTask) => void;
@@ -450,7 +456,7 @@ function TaskSection({
               key={task.id}
               task={task}
               selected={selectedId === task.id}
-              focusing={focusingId === task.id}
+              focusMode={activeFocusId === task.id ? focusMode : null}
               onSelect={() => onSelect(task)}
               onStart={() => onStart(task)}
               onViewNotes={() => onViewNotes(task)}
@@ -467,9 +473,10 @@ export function TaskDetailsPopup({
   task,
   notes,
   entries,
-  focusing,
+  focusMode,
   onClose,
   onStart,
+  onInterrupt,
   onAction,
   onAddNote,
   onViewNotes,
@@ -479,9 +486,10 @@ export function TaskDetailsPopup({
   task: FlowoTask | null;
   notes: TaskNote[];
   entries: TimelineActivity[];
-  focusing: boolean;
+  focusMode: ActiveFocusMode | null;
   onClose: () => void;
   onStart: () => void;
+  onInterrupt: () => void;
   onAction: (action: string) => void;
   onAddNote: () => void;
   onViewNotes: () => void;
@@ -538,8 +546,9 @@ export function TaskDetailsPopup({
           <div><span className="metric-icon"><CalendarDays size={16} /></span><p>Last Worked On<strong>{latest ? entryDate(latest) : "Not yet"}</strong><small>{latest ? formatClock(latest.startMinutes) : "Start a focus session"}</small></p></div>
         </section>
 
-        <div className="task-details-popup__actions">
-          {workEligible && <Button tone="primary" onClick={onStart}>{focusing ? <><Pause size={14} fill="currentColor" /> Focusing Now</> : <><Play size={14} fill="currentColor" /> Start Focus</>}</Button>}
+        <div className={`task-details-popup__actions ${focusMode === "focusing" ? "has-active-focus" : ""}`}>
+          {workEligible && <Button tone="primary" onClick={onStart}>{focusMode === "focusing" ? <><Pause size={14} fill="currentColor" /> Pause Focus</> : focusMode ? <><Play size={14} fill="currentColor" /> Resume Focus</> : <><Play size={14} fill="currentColor" /> Start Focus</>}</Button>}
+          {workEligible && focusMode === "focusing" && <Button tone="orange" onClick={onInterrupt}><Zap size={15} fill="currentColor" /> Interrupt</Button>}
           {workEligible && <Button onClick={() => onAction("Switch Task")}><SwitchCamera size={15} /> Switch Task</Button>}
           {task.status === "completed" || task.status === "cancelled" || task.status === "archived" ? <Button onClick={() => onAction(task.status === "archived" ? "Restore" : "Reopen")}><Check size={15} /> {task.status === "archived" ? "Restore Task" : "Reopen Task"}</Button> : <Button onClick={() => onAction("Mark Complete")}><Check size={15} /> Mark Complete</Button>}
           {workEligible && <Button className="is-danger" onClick={() => onAction("Cancel Task")}><X size={15} /> Cancel Task</Button>}
@@ -648,8 +657,12 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
   const currentFocusTask = useTodayStore((state) => state.currentTask);
   const focusMode = useTodayStore((state) => state.mode);
   const startTodayTask = useTodayStore((state) => state.startTask);
+  const toggleFocusPause = useTodayStore((state) => state.togglePause);
+  const resumeTodayFocus = useTodayStore((state) => state.resumeFocus);
+  const interruptTodayFocus = useTodayStore((state) => state.interrupt);
   const selectedTask = tasksWithNoteCounts.find((task) => task.id === selectedId) ?? null;
-  const focusingId = focusMode === "focusing" ? currentFocusTask?.id ?? null : null;
+  const activeFocusMode: ActiveFocusMode | null = focusMode === "focusing" || focusMode === "paused" || focusMode === "interrupted" ? focusMode : null;
+  const activeFocusId = activeFocusMode ? currentFocusTask?.id ?? null : null;
 
   useEffect(() => {
     void settingsService.all().then((settings) => {
@@ -774,11 +787,21 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
   const flash = (message: string) => setNotice(message);
 
   const startFocus = async (task: FlowoTask) => {
-    if (focusingId === task.id) {
-      flash(`${task.title} is already in focus.`);
+    if (activeFocusId === task.id) {
+      try {
+        if (activeFocusMode === "focusing") {
+          await toggleFocusPause();
+          flash(`${task.title} paused.`);
+        } else {
+          await resumeTodayFocus();
+          flash(`${task.title} resumed.`);
+        }
+      } catch (error) {
+        flash(error instanceof Error ? error.message : String(error));
+      }
       return;
     }
-    const switching = Boolean(focusingId);
+    const switching = Boolean(activeFocusId);
     try {
       await startTodayTask({
         id: task.id,
@@ -790,6 +813,16 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
       });
       setSelectedId(task.id);
       flash(switching ? `Switched focus to ${task.title}.` : `Focus started on ${task.title}.`);
+    } catch (error) {
+      flash(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const interruptActiveFocus = async () => {
+    if (activeFocusMode !== "focusing" || !currentFocusTask) return;
+    try {
+      await interruptTodayFocus();
+      flash(`${currentFocusTask.title} interrupted.`);
     } catch (error) {
       flash(error instanceof Error ? error.message : String(error));
     }
@@ -1016,7 +1049,8 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
                   title={section.title}
                   tasks={section.tasks}
                   selectedId={selectedId}
-                  focusingId={focusingId}
+                  activeFocusId={activeFocusId}
+                  focusMode={activeFocusMode}
                   onSelect={(task) => setSelectedId(task.id)}
                   onStart={startFocus}
                   onViewNotes={(task) => setNotesViewerTaskId(task.id)}
@@ -1041,9 +1075,10 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
         task={selectedTask}
         notes={selectedTask ? notesByTask[selectedTask.id] ?? [] : []}
         entries={timelineEntries}
-        focusing={Boolean(selectedTask && focusingId === selectedTask.id)}
+        focusMode={selectedTask && activeFocusId === selectedTask.id ? activeFocusMode : null}
         onClose={() => setSelectedId(null)}
         onStart={() => selectedTask && startFocus(selectedTask)}
+        onInterrupt={() => void interruptActiveFocus()}
         onAction={(action) => selectedTask && performAction(selectedTask, action)}
         onAddNote={() => selectedTask && openAddNote(selectedTask.id)}
         onViewNotes={() => selectedTask && setNotesViewerTaskId(selectedTask.id)}

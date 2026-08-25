@@ -1906,6 +1906,16 @@ kbd {
   background: rgba(24, 85, 156, 0.36);
   color: #4da4ff;
 }
+.task-focus-badge--paused {
+  border-color: rgba(139, 154, 175, 0.2);
+  background: rgba(76, 91, 111, 0.3);
+  color: #b5c0ce;
+}
+.task-focus-badge--interrupted {
+  border-color: rgba(255, 138, 0, 0.24);
+  background: rgba(137, 69, 9, 0.35);
+  color: #ffad4d;
+}
 .task-blocked-badge {
   border-color: rgba(235, 58, 44, 0.18);
   background: rgba(112, 31, 27, 0.5);
@@ -2597,6 +2607,7 @@ kbd {
   gap: 12px;
   margin-bottom: 19px;
 }
+.task-details-popup__actions.has-active-focus { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .task-details-popup__actions .cdk-button { min-height: 43px; font-size: 12px; }
 .task-details-popup__actions .is-danger { color: #ff7167; }
 
@@ -2717,7 +2728,8 @@ kbd {
   .task-details-metrics > div:nth-child(2) { border-right: 0; }
   .task-details-metrics > div:nth-child(-n + 2) { border-bottom: 1px solid #1d334a; padding-bottom: 13px; }
   .task-details-metrics > div:nth-child(n + 3) { padding-top: 13px; }
-  .task-details-popup__actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .task-details-popup__actions,
+  .task-details-popup__actions.has-active-focus { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .task-details-grid { grid-template-columns: 1fr; }
   .task-details-card { min-height: 0; }
 }
