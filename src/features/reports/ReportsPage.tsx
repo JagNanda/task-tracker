@@ -23,8 +23,10 @@ import {
   Minus,
   RefreshCw,
   Save,
+  Settings2,
   Trash2,
   TriangleAlert,
+  X,
   Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -315,10 +317,12 @@ export function ReportsPage({ onNavigate }: { onNavigate?: (label: string) => vo
   const [editorVersion, setEditorVersion] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
   const [notice, setNotice] = useState("");
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const [pendingRegenerate, setPendingRegenerate] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SavedReport | null>(null);
   const dateInput = useRef<HTMLInputElement>(null);
   const editor = useRef<HTMLDivElement>(null);
+  const optionsPopover = useRef<HTMLDivElement>(null);
   const initialDraftInstalled = useRef(false);
 
   const periodEntries = useMemo(() => entriesForPeriod(period, anchor, allEntries), [allEntries, anchor, period]);
@@ -328,6 +332,7 @@ export function ReportsPage({ onNavigate }: { onNavigate?: (label: string) => vo
   const unassignedMinutes = groups.find((group) => group.id === "unassigned")?.minutes ?? 0;
   const inputType = period === "month" ? "month" : "date";
   const inputValue = period === "month" ? anchor.slice(0, 7) : anchor;
+  const optionsChanged = (Object.keys(defaultOptions) as Array<keyof ReportOptions>).some((key) => options[key] !== defaultOptions[key]);
 
   const installHtml = (value: string, nextStatus: "generated" | "saved") => {
     setHtml(value);
@@ -369,6 +374,22 @@ export function ReportsPage({ onNavigate }: { onNavigate?: (label: string) => vo
     const timeout = window.setTimeout(() => setNotice(""), 2500);
     return () => window.clearTimeout(timeout);
   }, [notice]);
+
+  useEffect(() => {
+    if (!optionsOpen) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!optionsPopover.current?.contains(event.target as Node)) setOptionsOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOptionsOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [optionsOpen]);
 
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
@@ -506,6 +527,29 @@ export function ReportsPage({ onNavigate }: { onNavigate?: (label: string) => vo
             <input ref={dateInput} className="report-date-input" type={inputType} value={inputValue} onChange={(event) => event.target.value && changeAnchor(period === "month" ? `${event.target.value}-01` : event.target.value)} tabIndex={-1} />
           </div>
           <div className="report-date-actions">
+            <div className="report-options-popover" ref={optionsPopover}>
+              <Button
+                size="sm"
+                className={`report-options-trigger ${optionsOpen ? "is-open" : ""}`}
+                aria-expanded={optionsOpen}
+                aria-controls="report-options-menu"
+                onClick={() => setOptionsOpen((open) => !open)}
+              >
+                <Settings2 size={14} /> Options
+                {optionsChanged && <span className="report-options-trigger__dot" aria-label="Options differ from defaults" />}
+              </Button>
+              {optionsOpen && <aside id="report-options-menu" className="report-options-panel" aria-label="Report options">
+                <header><div><Settings2 size={15} /><h2>Report Options</h2><Info size={14} /></div><IconButton label="Close report options" onClick={() => setOptionsOpen(false)}><X size={16} /></IconButton></header>
+                <OptionToggle label="Include total focus time" help="Show total focused work time." checked={options.totalFocus} onChange={(value) => updateOption("totalFocus", value)} />
+                <OptionToggle label="Include time per task" help="Show time spent on each task." checked={options.timePerTask} onChange={(value) => updateOption("timePerTask", value)} />
+                <OptionToggle label="Include completed tasks" help="Show tasks completed this period." checked={options.completed} onChange={(value) => updateOption("completed", value)} />
+                <OptionToggle label="Include work in progress" help="Show tasks worked on but not completed." checked={options.inProgress} onChange={(value) => updateOption("inProgress", value)} />
+                <div className="report-options-divider" />
+                <OptionToggle label="Include interruptions" help="Show interruption time and categories." checked={options.interruptions} onChange={(value) => updateOption("interruptions", value)} />
+                <OptionToggle label="Include breaks" help="Show break time and categories." checked={options.breaks} onChange={(value) => updateOption("breaks", value)} />
+                {unassignedMinutes > 0 && <div className="unassigned-warning"><TriangleAlert size={18} /><strong>Some time is unassigned</strong><p>You have {formatDuration(unassignedMinutes)} of unassigned focus time in this period.</p><button type="button" onClick={() => safeNavigate("Timeline")}>Open Timeline <ArrowRight size={14} /></button></div>}
+              </aside>}
+            </div>
             <Button size="sm" tone="primary" onClick={handleCopy}><Copy size={14} /> Copy Report</Button>
             <Button size="sm" onClick={handleSave}><Save size={14} /> Save Report</Button>
             <Button size="sm" onClick={exportText}><Download size={14} /> Export .txt</Button>
@@ -513,18 +557,6 @@ export function ReportsPage({ onNavigate }: { onNavigate?: (label: string) => vo
         </div>
 
         <div className="reports-workspace">
-          <aside className="report-options-card">
-            <header><h2>Report Options</h2><Info size={15} /></header>
-            <OptionToggle label="Include total focus time" help="Show total focused work time." checked={options.totalFocus} onChange={(value) => updateOption("totalFocus", value)} />
-            <OptionToggle label="Include time per task" help="Show time spent on each task." checked={options.timePerTask} onChange={(value) => updateOption("timePerTask", value)} />
-            <OptionToggle label="Include completed tasks" help="Show tasks completed this period." checked={options.completed} onChange={(value) => updateOption("completed", value)} />
-            <OptionToggle label="Include work in progress" help="Show tasks worked on but not completed." checked={options.inProgress} onChange={(value) => updateOption("inProgress", value)} />
-            <div className="report-options-divider" />
-            <OptionToggle label="Include interruptions" help="Show interruption time and categories." checked={options.interruptions} onChange={(value) => updateOption("interruptions", value)} />
-            <OptionToggle label="Include breaks" help="Show break time and categories." checked={options.breaks} onChange={(value) => updateOption("breaks", value)} />
-            {unassignedMinutes > 0 && <div className="unassigned-warning"><TriangleAlert size={18} /><strong>Some time is unassigned</strong><p>You have {formatDuration(unassignedMinutes)} of unassigned focus time in this period.</p><button type="button" onClick={() => safeNavigate("Timeline")}>Open Timeline <ArrowRight size={14} /></button></div>}
-          </aside>
-
           <section className={`report-editor-card ${fullscreen ? "is-fullscreen" : ""}`}>
             <header className="report-editor-header"><div><span>Report Preview</span><small>Editable</small><b className={`report-status report-status--${status}`}>{status === "generated" ? "Generated" : status === "modified" ? "Unsaved" : "Saved"}</b></div><ReportToolbar onCommand={command} fullscreen={fullscreen} onFullscreen={() => setFullscreen((value) => !value)} /></header>
             <div ref={editor} className="report-editor" contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" aria-label="Editable report" onInput={(event) => { setHtml(event.currentTarget.innerHTML); setStatus("modified"); }} />
