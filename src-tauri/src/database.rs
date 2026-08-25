@@ -32,6 +32,21 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "settings-driven behaviour",
         include_str!("../migrations/003_settings_behaviour.sql"),
     ),
+    (
+        4,
+        "automatic break timer",
+        include_str!("../migrations/004_automatic_break_timer.sql"),
+    ),
+    (
+        5,
+        "completion sounds",
+        include_str!("../migrations/005_completion_sounds.sql"),
+    ),
+    (
+        6,
+        "activity corrections",
+        include_str!("../migrations/006_activity_corrections.sql"),
+    ),
 ];
 const DEFAULT_SETTINGS_SQL: &str = include_str!("../sql/default_settings.sql");
 const RESET_THEME_SQL: &str = "

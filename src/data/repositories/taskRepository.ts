@@ -42,11 +42,11 @@ export const taskRepository = {
     const dayEnd = new Date(new Date(dayStart).setDate(new Date(dayStart).getDate() + 1)).getTime();
     return select<TaskRecord>(
       `SELECT t.*,
-        CAST(COALESCE((SELECT SUM(MAX(0, COALESCE(ws.ended_at, ?1) - ws.started_at)) FROM work_segments ws WHERE ws.task_id = t.id), 0) / 60000 AS INTEGER) AS total_minutes,
-        CAST(COALESCE((SELECT SUM(MAX(0, MIN(COALESCE(ws.ended_at, ?1), ?3) - MAX(ws.started_at, ?2))) FROM work_segments ws WHERE ws.task_id = t.id AND ws.started_at < ?3 AND COALESCE(ws.ended_at, ?1) > ?2), 0) / 60000 AS INTEGER) AS today_minutes,
-        (SELECT MAX(ws.started_at) FROM work_segments ws WHERE ws.task_id = t.id) AS last_worked_at,
+        CAST(COALESCE((SELECT SUM(MAX(0, COALESCE(ws.ended_at, ?1) - ws.started_at)) FROM work_segments ws WHERE ws.task_id = t.id AND ws.is_cancelled = 0), 0) / 60000 AS INTEGER) AS total_minutes,
+        CAST(COALESCE((SELECT SUM(MAX(0, MIN(COALESCE(ws.ended_at, ?1), ?3) - MAX(ws.started_at, ?2))) FROM work_segments ws WHERE ws.task_id = t.id AND ws.is_cancelled = 0 AND ws.started_at < ?3 AND COALESCE(ws.ended_at, ?1) > ?2), 0) / 60000 AS INTEGER) AS today_minutes,
+        (SELECT MAX(ws.started_at) FROM work_segments ws WHERE ws.task_id = t.id AND ws.is_cancelled = 0) AS last_worked_at,
         (SELECT COUNT(*) FROM task_notes n WHERE n.task_id = t.id) AS note_count,
-        (SELECT COUNT(*) FROM task_reminders r WHERE r.task_id = t.id) AS reminder_count,
+        (SELECT COUNT(*) FROM task_reminders r WHERE r.task_id = t.id AND r.status = 'active') AS reminder_count,
         (SELECT r.scheduled_for FROM task_reminders r WHERE r.task_id = t.id AND r.status = 'active' ORDER BY r.scheduled_for LIMIT 1) AS next_reminder_at,
         (SELECT r.message FROM task_reminders r WHERE r.task_id = t.id AND r.status = 'active' ORDER BY r.scheduled_for LIMIT 1) AS next_reminder_message
        FROM tasks t ORDER BY COALESCE(last_worked_at, t.updated_at) DESC`,

@@ -277,11 +277,13 @@ export function Modal({
   title,
   children,
   onClose,
+  className,
 }: {
   open: boolean;
   title: string;
   children: ReactNode;
   onClose: () => void;
+  className?: string;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -293,7 +295,7 @@ export function Modal({
   if (!open) return null;
   return createPortal(
     <div className="cdk-modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className="cdk-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div className={cx("cdk-modal", className)} role="dialog" aria-modal="true" aria-labelledby="modal-title">
         <header>
           <h2 id="modal-title">{title}</h2>
           <IconButton label="Close dialog" onClick={onClose}>

@@ -8,6 +8,7 @@ export const mockTodayState: TodayState = {
   interruptionSeconds: 0,
   interruptionReason: "Meeting",
   selectedDuration: 25,
+  breakDurationMinutes: 5,
   todayMetrics: [
     { label: "Focus Time", value: "3h 42m", trend: "↑ 12% vs yesterday", favorable: true },
     { label: "Sessions", value: "6", trend: "↓ 2 vs yesterday", favorable: true },

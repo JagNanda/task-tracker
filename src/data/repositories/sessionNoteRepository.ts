@@ -16,6 +16,17 @@ export const sessionNoteRepository = {
       [sessionId],
     );
   },
+  async listRecentForTask(taskId: string, limit = 3) {
+    return select<Pick<SessionNoteRecord, "body" | "updated_at">>(
+      `SELECT body, MAX(updated_at) AS updated_at
+       FROM focus_session_notes
+       WHERE task_id = ?1
+       GROUP BY body
+       ORDER BY updated_at DESC
+       LIMIT ?2`,
+      [taskId, limit],
+    );
+  },
   async create(sessionId: string, taskId: string | null, body: string) {
     const id = createId("session_note");
     const now = nowUtcMs();

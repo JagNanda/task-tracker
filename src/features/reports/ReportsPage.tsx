@@ -12,7 +12,6 @@ import {
   Copy,
   Download,
   FileText,
-  Flag,
   Focus,
   Info,
   Italic,
@@ -317,6 +316,7 @@ export function ReportsPage({ onNavigate }: { onNavigate?: (label: string) => vo
   const [editorVersion, setEditorVersion] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
   const [notice, setNotice] = useState("");
+  const [saving, setSaving] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [pendingRegenerate, setPendingRegenerate] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SavedReport | null>(null);
@@ -404,7 +404,7 @@ export function ReportsPage({ onNavigate }: { onNavigate?: (label: string) => vo
     const saveShortcut = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
-        handleSave();
+        void handleSave();
       }
     };
     window.addEventListener("keydown", saveShortcut);
@@ -437,7 +437,8 @@ export function ReportsPage({ onNavigate }: { onNavigate?: (label: string) => vo
     generate(period, nextAnchor, false);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (saving) return;
     const value = currentHtml();
     const report: SavedReport = {
       id: `report-${Date.now()}`,
@@ -448,10 +449,18 @@ export function ReportsPage({ onNavigate }: { onNavigate?: (label: string) => vo
       savedAt: new Date().toISOString(),
       options: { ...options },
     };
-    saveReport(report);
-    setHtml(value);
-    setStatus("saved");
-    setNotice("Report saved as a new version.");
+    setSaving(true);
+    try {
+      await saveReport(report);
+      setHtml(value);
+      setStatus("saved");
+      setNotice("Report saved as a new version.");
+    } catch (error) {
+      setStatus("modified");
+      setNotice(`Report could not be saved: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleCopy = async () => {
@@ -509,7 +518,7 @@ export function ReportsPage({ onNavigate }: { onNavigate?: (label: string) => vo
       <main className="reports-page">
         <header className="reports-header">
           <div><h1>Reports</h1><p>Turn your tracked work into a clean, shareable summary.</p></div>
-          <Button onClick={() => changeAnchor(localDateKey())}><Flag size={16} /> End Day</Button>
+          <Button onClick={() => changeAnchor(localDateKey())}><CalendarDays size={16} /> Today</Button>
         </header>
 
         <div className="report-period-bar">
@@ -551,7 +560,7 @@ export function ReportsPage({ onNavigate }: { onNavigate?: (label: string) => vo
               </aside>}
             </div>
             <Button size="sm" tone="primary" onClick={handleCopy}><Copy size={14} /> Copy Report</Button>
-            <Button size="sm" onClick={handleSave}><Save size={14} /> Save Report</Button>
+            <Button size="sm" disabled={saving} onClick={() => void handleSave()}><Save size={14} /> {saving ? "Saving…" : "Save Report"}</Button>
             <Button size="sm" onClick={exportText}><Download size={14} /> Export .txt</Button>
           </div>
         </div>

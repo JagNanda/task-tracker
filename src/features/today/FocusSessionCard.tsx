@@ -4,11 +4,13 @@ import {
   ChevronDown,
   CirclePause,
   Clock3,
+  Coffee,
   Edit3,
   Pause,
   Play,
   Plus,
   Repeat2,
+  Settings2,
   X,
   Zap,
 } from "lucide-react";
@@ -19,6 +21,7 @@ import { formatClock } from "./utils";
 import { interruptionService } from "../../data/services/interruptionService";
 import { settingsService } from "../../data/services/settingsService";
 import { defaultSettings, type SettingsState } from "../settings/settingsDefaults";
+import { sessionNoteRepository } from "../../data/repositories/sessionNoteRepository";
 
 export function CurrentTaskHeader({ task, onEdit, mode }: { task: Task; onEdit: () => void; mode: string }) {
   const eyebrow = mode === "interrupted" ? "INTERRUPTED" : mode === "paused" ? "SESSION PAUSED" : mode === "ready" ? "READY TO FOCUS" : "FOCUSING ON";
@@ -224,7 +227,38 @@ function IdleFocusCard({ onPick, durationPresets }: { onPick: () => void; durati
   );
 }
 
-export function FocusSessionCard() {
+function BreakSessionCard({ onOpenSettings }: { onOpenSettings?: () => void }) {
+  const remainingSeconds = useTodayStore((state) => state.remainingSeconds);
+  const totalSeconds = useTodayStore((state) => state.totalSeconds);
+  const breakDurationMinutes = useTodayStore((state) => state.breakDurationMinutes);
+  const endBreak = useTodayStore((state) => state.endBreak);
+  return (
+    <Card className="focus-card focus-card--break">
+      <div className="focus-card__main">
+        <div className="focus-card__timer">
+          <FocusTimer remainingSeconds={remainingSeconds} totalSeconds={totalSeconds} mode="break" interruptionSeconds={0}>
+            <div className="break-timer-header">
+              <span><Coffee size={14} /> BREAK TIME</span>
+              <strong>Rest and reset</strong>
+              <p>Your next focus session can start when you’re ready.</p>
+            </div>
+          </FocusTimer>
+        </div>
+        <div className="focus-controls break-controls">
+          <Button tone="primary" size="lg" onClick={() => void endBreak()}><Check size={19} /> End Break</Button>
+          {onOpenSettings && <Button size="lg" onClick={onOpenSettings}><Settings2 size={18} /> Break Settings</Button>}
+          <div className="break-controls__tip"><Coffee size={16} /><p><strong>Step away for a moment</strong><span>Stretch, hydrate, or rest your eyes.</span></p></div>
+        </div>
+      </div>
+      <div className="focus-card__footer">
+        <div className="break-footer"><Badge>Automatic break</Badge><span>{breakDurationMinutes} minute{breakDurationMinutes === 1 ? "" : "s"} after each completed session</span></div>
+        <div className="session-meta"><span>Break tracking: On <i /></span></div>
+      </div>
+    </Card>
+  );
+}
+
+export function FocusSessionCard({ onOpenSettings }: { onOpenSettings?: () => void }) {
   const mode = useTodayStore((state) => state.mode);
   const task = useTodayStore((state) => state.currentTask);
   const remainingSeconds = useTodayStore((state) => state.remainingSeconds);
@@ -239,6 +273,7 @@ export function FocusSessionCard() {
   const setDuration = useTodayStore((state) => state.setDuration);
   const cancelSession = useTodayStore((state) => state.cancelSession);
   const completeSession = useTodayStore((state) => state.completeSession);
+  const extendSession = useTodayStore((state) => state.extendSession);
   const [taskPickerOpen, setTaskPickerOpen] = useState(false);
   const [finishOpen, setFinishOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -248,6 +283,9 @@ export function FocusSessionCard() {
   const [completionNote, setCompletionNote] = useState("");
   const [completionError, setCompletionError] = useState("");
   const [completing, setCompleting] = useState(false);
+  const [extending, setExtending] = useState(false);
+  const [extensionMinutes, setExtensionMinutes] = useState(selectedDuration);
+  const [recentSummaries, setRecentSummaries] = useState<string[]>([]);
   const [interruptionPresets, setInterruptionPresets] = useState<string[]>([]);
   const [preferences, setPreferences] = useState<SettingsState>({ ...defaultSettings, "focus.quickDurations": [...defaultSettings["focus.quickDurations"]], "reminders.snoozeOptions": [...defaultSettings["reminders.snoozeOptions"]] });
   const [reasonModalPurpose, setReasonModalPurpose] = useState<"record" | "resume">("resume");
@@ -260,10 +298,15 @@ export function FocusSessionCard() {
   }, []);
 
   useEffect(() => {
-    if (mode !== "focusing" || remainingSeconds !== 0) return;
-    setCompletionError("");
-    setFinishOpen(true);
-  }, [mode, remainingSeconds]);
+    if (!finishOpen || !task) return;
+    let current = true;
+    void sessionNoteRepository.listRecentForTask(task.id).then((notes) => {
+      if (current) setRecentSummaries(notes.map((note) => note.body));
+    }).catch(() => {
+      if (current) setRecentSummaries([]);
+    });
+    return () => { current = false; };
+  }, [finishOpen, task]);
 
   const beginInterruption = async () => {
     await interrupt();
@@ -284,12 +327,30 @@ export function FocusSessionCard() {
   };
   const finish = () => {
     setCompletionError("");
+    setExtensionMinutes(selectedDuration);
     setFinishOpen(true);
+  };
+
+  const continueFocusing = async () => {
+    if (remainingSeconds > 0) {
+      setFinishOpen(false);
+      return;
+    }
+    setExtending(true);
+    setCompletionError("");
+    try {
+      await extendSession(extensionMinutes);
+      setFinishOpen(false);
+    } catch (error) {
+      setCompletionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setExtending(false);
+    }
   };
 
   const submitCompletion = async () => {
     const summary = completionNote.trim();
-    if (!summary) {
+    if (!summary && preferences["focus.requireCompletionNote"]) {
       setCompletionError("Add a quick summary of what you worked on.");
       return;
     }
@@ -319,6 +380,10 @@ export function FocusSessionCard() {
       window.removeEventListener("flowo:finish-focus", finishFromShortcut);
     };
   });
+
+  if (mode === "break") {
+    return <><BreakSessionCard onOpenSettings={onOpenSettings} /><TaskPicker open={taskPickerOpen} onClose={() => setTaskPickerOpen(false)} /></>;
+  }
 
   if (mode === "idle" || !task) {
     return <><IdleFocusCard onPick={() => setTaskPickerOpen(true)} durationPresets={preferences["focus.quickDurations"]} /><TaskPicker open={taskPickerOpen} onClose={() => setTaskPickerOpen(false)} /></>;
@@ -381,10 +446,10 @@ export function FocusSessionCard() {
           <Button tone="orange" disabled={!interruptionReasonDraft.trim()} onClick={() => { setReason(interruptionReasonDraft.trim()); if (reasonModalPurpose === "resume") void resumeFocus(); setInterruptionReasonOpen(false); }}>{reasonModalPurpose === "resume" && <Play size={16} fill="currentColor" />} {reasonModalPurpose === "resume" ? "Save reason & resume" : "Save reason"}</Button>
         </div>
       </Modal>
-      <Modal open={finishOpen} title={remainingSeconds === 0 ? "Complete focus session" : "Finish this session early?"} onClose={() => { if (!completing) setFinishOpen(false); }}>
+      <Modal open={finishOpen} title={remainingSeconds === 0 ? "Complete focus session" : "Finish this session early?"} onClose={() => { if (!completing && !extending) void continueFocusing(); }}>
         <p className="modal-description">Before finishing, capture what you did in one or two sentences. This summary is saved with the session and appears in your work history.</p>
         <label className="completion-note-field" htmlFor="completion-note">
-          <span>Session summary <em>Required</em></span>
+          <span>Session summary {preferences["focus.requireCompletionNote"] && <em>Required</em>}</span>
           <textarea
             id="completion-note"
             value={completionNote}
@@ -401,9 +466,21 @@ export function FocusSessionCard() {
           <span className="completion-note-field__meta" id="completion-note-help"><small>Keep it brief · Ctrl+Enter to finish</small><small>{completionNote.length}/280</small></span>
           {completionError && <small className="completion-note-field__error" id="completion-note-error" role="alert">{completionError}</small>}
         </label>
+        {recentSummaries.length > 0 && (
+          <div className="completion-note-recent">
+            <span>Use a recent summary</span>
+            <div>{recentSummaries.map((summary) => <button className={completionNote === summary ? "is-selected" : ""} type="button" key={summary} onClick={() => { setCompletionNote(summary); setCompletionError(""); }} title={summary}>{summary}</button>)}</div>
+          </div>
+        )}
+        {remainingSeconds === 0 && (
+          <div className="completion-extension">
+            <span>Keep focusing for</span>
+            <div>{preferences["focus.quickDurations"].map((minutes) => <Pill key={minutes} selected={extensionMinutes === minutes} onClick={() => setExtensionMinutes(minutes)}>{minutes}m</Pill>)}</div>
+          </div>
+        )}
         <div className="modal-actions">
-          <Button disabled={completing} onClick={() => setFinishOpen(false)}>Keep focusing</Button>
-          <Button tone="primary" disabled={completing || !completionNote.trim()} onClick={() => void submitCompletion()}><Check size={17} /> {completing ? "Saving…" : "Finish session"}</Button>
+          <Button disabled={completing || extending} onClick={() => void continueFocusing()}>{extending ? "Extending…" : remainingSeconds === 0 ? `Keep focusing · +${extensionMinutes}m` : "Keep focusing"}</Button>
+          <Button tone="primary" disabled={completing || extending || (preferences["focus.requireCompletionNote"] && !completionNote.trim())} onClick={() => void submitCompletion()}><Check size={17} /> {completing ? "Saving…" : "Finish session"}</Button>
         </div>
       </Modal>
       <Modal open={cancelOpen} title="Cancel active work?" onClose={() => setCancelOpen(false)}>

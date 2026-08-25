@@ -8,23 +8,22 @@ import { TodayHeader } from "./TodayHeader";
 import { TodayTimeline } from "./TodayTimeline";
 import { useTodayStore } from "./store";
 import { settingsService } from "../../data/services/settingsService";
+import { RemindersDialog } from "../reminders/RemindersDialog";
+import { useTaskStore } from "../tasks/taskStore";
 
 export function TodayPage({ onNavigate }: { onNavigate?: (label: string) => void }) {
-  const tick = useTodayStore((state) => state.tick);
   const initialize = useTodayStore((state) => state.initialize);
+  const refreshDashboard = useTodayStore((state) => state.refreshDashboard);
   const mode = useTodayStore((state) => state.mode);
   const togglePause = useTodayStore((state) => state.togglePause);
   const [shortcutsEnabled, setShortcutsEnabled] = useState(true);
+  const [remindersOpen, setRemindersOpen] = useState(false);
+  const tasks = useTaskStore((state) => state.tasks);
 
   useEffect(() => {
     void initialize();
     void settingsService.get<boolean>("shortcuts.enabled").then((enabled) => setShortcutsEnabled(enabled ?? true));
   }, [initialize]);
-
-  useEffect(() => {
-    const timer = window.setInterval(tick, 1000);
-    return () => window.clearInterval(timer);
-  }, [tick]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -43,9 +42,9 @@ export function TodayPage({ onNavigate }: { onNavigate?: (label: string) => void
         void togglePause();
       } else if (key === "i" && mode === "focusing") {
         window.dispatchEvent(new Event("flowo:interrupt"));
-      } else if (key === "t" && mode !== "idle") {
+      } else if (key === "t" && mode !== "idle" && mode !== "break") {
         window.dispatchEvent(new Event("flowo:switch-task"));
-      } else if (key === "f" && mode !== "idle" && mode !== "ready") {
+      } else if (key === "f" && mode !== "idle" && mode !== "ready" && mode !== "break") {
         window.dispatchEvent(new Event("flowo:finish-focus"));
       } else if (key === "n") {
         onNavigate?.("Tasks");
@@ -62,15 +61,21 @@ export function TodayPage({ onNavigate }: { onNavigate?: (label: string) => void
         <TodayHeader onEndDay={() => onNavigate?.("Reports")} />
         <div className="today-grid">
           <div className="today-primary">
-            <FocusSessionCard />
+            <FocusSessionCard onOpenSettings={() => { window.sessionStorage.setItem("flowo:settings-section", "focus"); onNavigate?.("Settings"); }} />
             <CurrentTaskNotes />
             <TodayTimeline />
           </div>
-          <RightRail />
+          <RightRail onNavigate={onNavigate} onOpenReminders={() => setRemindersOpen(true)} />
         </div>
       </main>
       <QuickActionBar />
       <MobileNavigation selected="Today" onNavigate={onNavigate} />
+      <RemindersDialog
+        open={remindersOpen}
+        tasks={tasks.filter((task) => task.status === "in-progress" || task.status === "todo" || task.status === "blocked").map((task) => ({ id: task.id, title: task.title }))}
+        onClose={() => setRemindersOpen(false)}
+        onChanged={refreshDashboard}
+      />
     </div>
   );
 }

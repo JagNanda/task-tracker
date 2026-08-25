@@ -274,8 +274,31 @@ function EntryEditor({
   );
 }
 
-function TaskPreview({ taskId, entries, onClose }: { taskId: string | null; entries: TimelineActivity[]; onClose: () => void }) {
-  const task = timelineTasks.find((item) => item.id === taskId);
+const previewStatusLabels = {
+  todo: "To Do",
+  "in-progress": "In Progress",
+  blocked: "Blocked",
+  completed: "Completed",
+  cancelled: "Cancelled",
+  archived: "Archived",
+} as const;
+
+function TaskPreview({
+  taskId,
+  entries,
+  onClose,
+  onNavigate,
+  onViewHistory,
+}: {
+  taskId: string | null;
+  entries: TimelineActivity[];
+  onClose: () => void;
+  onNavigate?: (label: string) => void;
+  onViewHistory: (taskId: string, date: string) => void;
+}) {
+  const task = useTaskStore((state) => state.tasks.find((item) => item.id === taskId));
+  const setTaskStatus = useTaskStore((state) => state.setStatus);
+  const startTask = useTodayStore((state) => state.startTask);
   useEffect(() => {
     if (!task) return;
     const onKeyDown = (event: KeyboardEvent) => event.key === "Escape" && onClose();
@@ -285,23 +308,42 @@ function TaskPreview({ taskId, entries, onClose }: { taskId: string | null; entr
   if (!task) return null;
   const taskEntries = entries.filter((entry) => entry.taskId === task.id && !entry.cancelled);
   const total = taskEntries.reduce((sum, entry) => sum + entryMinutes(entry), 0);
-  const latest = [...taskEntries].sort((a, b) => b.startMinutes - a.startMinutes)[0];
+  const latest = [...taskEntries].sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0];
   const tags = task.context.split(" / ");
+  const workEligible = task.status === "todo" || task.status === "in-progress" || task.status === "blocked";
+  const openTaskAction = (action: "edit" | "reminder" | "note") => {
+    window.sessionStorage.setItem("flowo:tasks-open", task.id);
+    window.sessionStorage.setItem("flowo:tasks-action", action);
+    onClose();
+    onNavigate?.("Tasks");
+  };
+  const beginFocus = async () => {
+    await startTask({
+      id: task.id,
+      title: task.title,
+      category: tags[1] ?? tags[0] ?? "General",
+      tag: tags[0] ?? "Unsorted",
+      duration: formatDuration(total),
+      color: "var(--blue)",
+    });
+    onClose();
+    onNavigate?.("Today");
+  };
   return createPortal(
     <div className="task-details-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="task-details-popup timeline-task-preview" role="dialog" aria-modal="true" aria-labelledby="timeline-task-title">
-        <header className="task-details-popup__header"><div className="task-details-popup__heading"><span className="task-details-popup__dot" /><h2 id="timeline-task-title">{task.title}</h2><IconButton label="Edit task"><Pencil size={17} /></IconButton></div><IconButton className="task-details-popup__close" label="Close task details" onClick={onClose}><X size={20} /></IconButton></header>
-        <div className="task-details-popup__tags"><button className="task-details-popup__status" type="button"><span /> In Progress <ChevronDown size={13} /></button>{tags.map((tag) => <Badge key={tag}>{tag}</Badge>)}</div>
+        <header className="task-details-popup__header"><div className="task-details-popup__heading"><span className={`task-details-popup__dot task-details-popup__dot--${task.status}`} /><h2 id="timeline-task-title">{task.title}</h2><IconButton label="Edit task" onClick={() => openTaskAction("edit")}><Pencil size={17} /></IconButton></div><IconButton className="task-details-popup__close" label="Close task details" onClick={onClose}><X size={20} /></IconButton></header>
+        <div className="task-details-popup__tags"><label className={`task-details-popup__status task-details-popup__status--${task.status}`}><span /><select aria-label="Task status" value={task.status} onChange={(event) => void setTaskStatus(task.id, event.target.value as typeof task.status)}>{Object.entries(previewStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><ChevronDown size={13} /></label>{tags.map((tag) => <Badge key={tag}>{tag}</Badge>)}</div>
         <section className="task-details-metrics" aria-label="Task metrics">
           <div><span className="metric-icon metric-icon--blue"><Clock3 size={16} /></span><p>Total Focus Time<strong>{formatDuration(total)}</strong><small>From tracked timeline</small></p></div>
           <div><span className="metric-icon metric-icon--green"><TimerReset size={16} /></span><p>Sessions<strong>{new Set(taskEntries.map((entry) => entry.sessionId ?? entry.id)).size}</strong><small>Focus sessions</small></p></div>
           <div><span className="metric-icon metric-icon--purple"><Play size={16} /></span><p>Last Session<strong>{latest ? formatDuration(entryMinutes(latest)) : "—"}</strong><small>{latest ? `${formatClock(latest.startMinutes)} today` : "No sessions yet"}</small></p></div>
-          <div><span className="metric-icon"><CalendarDays size={16} /></span><p>Last Worked On<strong>{latest ? "Today" : "—"}</strong><small>{latest ? formatClock(latest.startMinutes) : "No history"}</small></p></div>
+          <div><span className="metric-icon"><CalendarDays size={16} /></span><p>Last Worked On<strong>{latest ? displayDate(latest.date) : "—"}</strong><small>{latest ? formatClock(latest.startMinutes) : "No history"}</small></p></div>
         </section>
-        <div className="task-details-popup__actions"><Button tone="primary"><Play size={14} fill="currentColor" /> Start Focus</Button><Button><Bell size={14} /> Add Reminder</Button><Button><MessageSquareText size={14} /> Add Note</Button><Button><Check size={14} /> Mark Complete</Button></div>
+        <div className="task-details-popup__actions">{workEligible && <Button tone="primary" onClick={() => void beginFocus()}><Play size={14} fill="currentColor" /> Start Focus</Button>}{workEligible && <Button onClick={() => openTaskAction("reminder")}><Bell size={14} /> Add Reminder</Button>}<Button onClick={() => openTaskAction("note")}><MessageSquareText size={14} /> Add Note</Button><Button onClick={() => void setTaskStatus(task.id, task.status === "completed" || task.status === "cancelled" || task.status === "archived" ? "todo" : "completed")}><Check size={14} /> {workEligible ? "Mark Complete" : "Reopen"}</Button></div>
         <div className="task-details-grid">
-          <section className="task-details-card task-details-description"><header><h3>Description / Context</h3><button type="button"><Pencil size={15} /></button></header><p>{task.description}</p><strong>Context</strong><ul><li>{task.context}</li><li>Tracked activity stays private in Timeline</li></ul></section>
-          <section className="task-details-card"><header><h3>Work History</h3><button type="button">View full history</button></header><div className="task-history-list">{taskEntries.slice().reverse().map((entry) => <article key={entry.id}><span /><div><strong>Today, {formatClock(entry.startMinutes)} – {formatClock(entry.endMinutes)}</strong><small>Focus session</small></div><b>{formatDuration(entryMinutes(entry))}</b><small><MessageSquareText size={12} /> {entry.note ? 1 : 0}</small></article>)}</div></section>
+          <section className="task-details-card task-details-description"><header><h3>Description / Context</h3><button type="button" aria-label="Edit task description" onClick={() => openTaskAction("edit")}><Pencil size={15} /></button></header><p>{task.description}</p><strong>Context</strong><ul>{tags.map((tag) => <li key={tag}>{tag}</li>)}</ul></section>
+          <section className="task-details-card"><header><h3>Work History</h3><button type="button" onClick={() => onViewHistory(task.id, latest?.date ?? localDateKey())}>Open in Timeline</button></header><div className="task-history-list">{taskEntries.slice().sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0)).slice(0, 5).map((entry) => <article key={entry.id}><span /><div><strong>{displayDate(entry.date)}, {formatClock(entry.startMinutes)} – {formatClock(entry.endMinutes)}</strong><small>Focus session</small></div><b>{formatDuration(entryMinutes(entry))}</b><small><MessageSquareText size={12} /> {entry.note ? 1 : 0}</small></article>)}{!taskEntries.length && <p className="task-details-empty">No focus sessions yet.</p>}</div></section>
         </div>
       </section>
     </div>,
@@ -399,10 +441,17 @@ export function TimelinePage({ onNavigate }: { onNavigate?: (label: string) => v
     setIsNew(true);
   };
 
-  const saveEntry = (entry: TimelineActivity) => {
-    if (isNew) addEntry(entry); else updateEntry(entry.id, entry);
-    setSelected(entry);
+  const saveEntry = async (entry: TimelineActivity) => {
+    if (isNew) await addEntry(entry); else await updateEntry(entry.id, entry);
+    await useTodayStore.getState().refreshDashboard();
+    setSelected(useTimelineStore.getState().entries.find((item) => item.id === entry.id) ?? entry);
     setIsNew(false);
+  };
+
+  const deleteAndRefresh = async (entry: TimelineActivity) => {
+    await deleteEntry(entry.id);
+    await useTodayStore.getState().refreshDashboard();
+    setSelected(null);
   };
 
   const openUnassigned = () => {
@@ -415,8 +464,7 @@ export function TimelinePage({ onNavigate }: { onNavigate?: (label: string) => v
       setDeleteTarget(entry);
       return;
     }
-    void deleteEntry(entry.id);
-    setSelected(null);
+    void deleteAndRefresh(entry);
   };
 
   return (
@@ -447,13 +495,19 @@ export function TimelinePage({ onNavigate }: { onNavigate?: (label: string) => v
             </div>) : !liveEntry && <div className="timeline-empty-state"><FileText size={35} /><h2>No activity for this date</h2><p>{query || filter !== "all" || taskFilter !== "all" ? "Try clearing your filters or search." : "Add a manual entry if you forgot to run the timer."}</p><Button onClick={openNew}><Plus size={15} /> Add Entry</Button></div>}
             {liveEntry && (liveInsertIndex === -1 || !groups.length) && <div className="live-activity"><ActivityRow entry={liveEntry} active activeSeconds={liveSeconds} selected={false} onSelect={() => onNavigate?.("Today")} onOpenTask={() => setTaskPreviewId(liveEntry.taskId ?? null)} /></div>}
           </section>
-          {selected && <EntryEditor key={`${selected.id}-${isNew}`} entry={selected} isNew={isNew} interruptionReasons={interruptionReasons} onClose={() => { setSelected(null); setIsNew(false); }} onSave={saveEntry} onDelete={() => requestDelete(selected)} />}
+          {selected && <EntryEditor key={`${selected.id}-${isNew}`} entry={selected} isNew={isNew} interruptionReasons={interruptionReasons} onClose={() => { setSelected(null); setIsNew(false); }} onSave={(entry) => void saveEntry(entry)} onDelete={() => requestDelete(selected)} />}
         </div>
         <Reconciliation entries={dayEntries} onUnassigned={openUnassigned} />
       </main>
       <MobileNavigation selected="Timeline" onNavigate={onNavigate} />
-      <Modal open={Boolean(deleteTarget)} title="Delete timeline entry?" onClose={() => setDeleteTarget(null)}><p className="modal-description">This removes the entry from Timeline and recalculates its time everywhere. This action cannot be undone.</p><div className="modal-actions"><Button onClick={() => setDeleteTarget(null)}>Cancel</Button><Button className="timeline-delete-confirm" onClick={() => { if (deleteTarget) deleteEntry(deleteTarget.id); setDeleteTarget(null); setSelected(null); }}><Trash2 size={15} /> Delete Entry</Button></div></Modal>
-      <TaskPreview taskId={taskPreviewId} entries={entries} onClose={() => setTaskPreviewId(null)} />
+      <Modal open={Boolean(deleteTarget)} title="Delete timeline entry?" onClose={() => setDeleteTarget(null)}><p className="modal-description">This removes the entry from Timeline and recalculates its time everywhere. This action cannot be undone.</p><div className="modal-actions"><Button onClick={() => setDeleteTarget(null)}>Cancel</Button><Button className="timeline-delete-confirm" onClick={() => { if (deleteTarget) void deleteAndRefresh(deleteTarget); setDeleteTarget(null); }}><Trash2 size={15} /> Delete Entry</Button></div></Modal>
+      <TaskPreview
+        taskId={taskPreviewId}
+        entries={entries}
+        onClose={() => setTaskPreviewId(null)}
+        onNavigate={onNavigate}
+        onViewHistory={(taskId, historyDate) => { setTaskFilter(taskId); setFilter("focus"); setDate(historyDate); setTaskPreviewId(null); }}
+      />
     </div>
   );
 }

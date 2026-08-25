@@ -1,4 +1,4 @@
-export type SessionMode = "idle" | "ready" | "focusing" | "paused" | "interrupted";
+export type SessionMode = "idle" | "ready" | "focusing" | "paused" | "interrupted" | "break";
 
 export interface Task {
   id: string;
@@ -21,6 +21,7 @@ export interface Reminder {
   title: string;
   at: string;
   relative: string;
+  message?: string;
 }
 
 export interface TimelineEntry {
@@ -40,6 +41,7 @@ export interface TodayState {
   interruptionSeconds: number;
   interruptionReason: string;
   selectedDuration: number;
+  breakDurationMinutes: number;
   todayMetrics: Metric[];
   timeline: TimelineEntry[];
   reminders: Reminder[];

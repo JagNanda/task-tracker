@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { taskRepository, type SaveTaskInput, type TaskRecord, type TaskStatus as DatabaseTaskStatus } from "../../data/repositories/taskRepository";
-import { taskReminderRepository } from "../../data/repositories/taskReminderRepository";
 import type { FlowoTask, TaskStatus } from "./TasksPage";
 
 const uiStatus: Record<DatabaseTaskStatus, TaskStatus> = {
@@ -42,7 +41,9 @@ function toFlowoTask(task: TaskRecord): FlowoTask {
     totalMinutes: task.total_minutes,
     todayMinutes: task.today_minutes,
     reminder: task.next_reminder_at === null ? undefined : {
-      label: task.next_reminder_message || reminderLabel(task.next_reminder_at),
+      label: reminderLabel(task.next_reminder_at),
+      message: task.next_reminder_message || undefined,
+      scheduledFor: task.next_reminder_at,
       sortValue: reminderMinutes ?? Number.MAX_SAFE_INTEGER,
       overdue: (reminderMinutes ?? 0) < 0,
     },
@@ -60,10 +61,9 @@ type TaskStore = {
   loaded: boolean;
   error: string | null;
   load: () => Promise<void>;
-  createTask: (input: SaveTaskInput, reminderMessage?: string) => Promise<string>;
-  updateTask: (id: string, input: SaveTaskInput, reminderMessage?: string) => Promise<void>;
+  createTask: (input: SaveTaskInput) => Promise<string>;
+  updateTask: (id: string, input: SaveTaskInput) => Promise<void>;
   setStatus: (id: string, status: TaskStatus) => Promise<void>;
-  addReminder: (id: string, message?: string, scheduledFor?: number) => Promise<void>;
   deletePermanently: (id: string) => Promise<void>;
 };
 
@@ -79,30 +79,17 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       set({ loaded: true, error: error instanceof Error ? error.message : String(error) });
     }
   },
-  createTask: async (input, reminderMessage) => {
+  createTask: async (input) => {
     const id = await taskRepository.create(input);
-    if (reminderMessage?.trim()) {
-      await taskReminderRepository.create(id, Date.now() + 24 * 60 * 60 * 1000, reminderMessage);
-    }
     await get().load();
     return id;
   },
-  updateTask: async (id, input, reminderMessage) => {
+  updateTask: async (id, input) => {
     await taskRepository.update(id, input);
-    if (reminderMessage?.trim()) {
-      const reminders = await taskReminderRepository.listForTask(id);
-      if (!reminders.some((reminder) => reminder.status === "active")) {
-        await taskReminderRepository.create(id, Date.now() + 24 * 60 * 60 * 1000, reminderMessage);
-      }
-    }
     await get().load();
   },
   setStatus: async (id, status) => {
     await taskRepository.setStatus(id, databaseStatus[status]);
-    await get().load();
-  },
-  addReminder: async (id, message = "Reminder", scheduledFor = Date.now() + 24 * 60 * 60 * 1000) => {
-    await taskReminderRepository.create(id, scheduledFor, message);
     await get().load();
   },
   deletePermanently: async (id) => {

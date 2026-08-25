@@ -19,6 +19,7 @@ import { useTodayStore } from "../today/store";
 import { type FlowoTask, TaskDetailsPopup, type TaskStatus } from "../tasks/TasksPage";
 import { useTaskNotesStore } from "../tasks/notesStore";
 import { useTaskStore } from "../tasks/taskStore";
+import { RemindersDialog } from "../reminders/RemindersDialog";
 import {
   activitySummary,
   entryMinutes,
@@ -217,12 +218,12 @@ export function InsightsPage({ onNavigate }: { onNavigate?: (label: string) => v
   const tasks = useTaskStore((state) => state.tasks);
   const notesByTask = useTaskNotesStore((state) => state.notesByTask);
   const setTaskStatus = useTaskStore((state) => state.setStatus);
-  const addTaskReminder = useTaskStore((state) => state.addReminder);
   const startTodayTask = useTodayStore((state) => state.startTask);
   const focusingId = useTodayStore((state) => state.currentTask?.id ?? null);
   const [period, setPeriod] = useState<Period>("week");
   const [anchor, setAnchor] = useState(localDateKey);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [reminderTaskId, setReminderTaskId] = useState<string | null>(null);
   const calendarInput = useRef<HTMLInputElement>(null);
 
   const range = useMemo(() => rangeFor(anchor, period), [anchor, period]);
@@ -316,7 +317,10 @@ export function InsightsPage({ onNavigate }: { onNavigate?: (label: string) => v
 
   const taskAction = async (task: FlowoTask, action: string) => {
     if (action === "Switch Task") return startTask(task);
-    if (action === "Add Reminder") return addTaskReminder(task.id, "Reminder");
+    if (action === "Add Reminder") {
+      setReminderTaskId(task.id);
+      return;
+    }
     if (action === "Edit") {
       window.sessionStorage.setItem("flowo:tasks-open", task.id);
       setSelectedTaskId(null);
@@ -328,12 +332,14 @@ export function InsightsPage({ onNavigate }: { onNavigate?: (label: string) => v
       "Cancel Task": "cancelled",
       Archive: "archived",
       Reopen: "todo",
+      Restore: "todo",
     };
     if (statusByAction[action]) await setTaskStatus(task.id, statusByAction[action]);
   };
 
-  const openTaskPage = (task: FlowoTask) => {
+  const openTaskPage = (task: FlowoTask, action?: "note") => {
     window.sessionStorage.setItem("flowo:tasks-open", task.id);
+    if (action) window.sessionStorage.setItem("flowo:tasks-action", action);
     setSelectedTaskId(null);
     onNavigate?.("Tasks");
   };
@@ -459,12 +465,25 @@ export function InsightsPage({ onNavigate }: { onNavigate?: (label: string) => v
       <TaskDetailsPopup
         task={selectedTask}
         notes={selectedTask ? notesByTask[selectedTask.id] ?? [] : []}
+        entries={entries}
         focusing={Boolean(selectedTask && focusingId === selectedTask.id)}
         onClose={() => setSelectedTaskId(null)}
         onStart={() => selectedTask && void startTask(selectedTask)}
         onAction={(action) => selectedTask && void taskAction(selectedTask, action)}
-        onAddNote={() => selectedTask && openTaskPage(selectedTask)}
+        onAddNote={() => selectedTask && openTaskPage(selectedTask, "note")}
         onViewNotes={() => selectedTask && openTaskPage(selectedTask)}
+        onViewHistory={() => selectedTask && navigateTimeline(
+          entries.filter((entry) => entry.taskId === selectedTask.id).sort((a, b) => b.date.localeCompare(a.date))[0]?.date ?? localDateKey(),
+          { filter: "focus", taskFilter: selectedTask.id },
+        )}
+        onStatusChange={(status) => { if (selectedTask) void setTaskStatus(selectedTask.id, status); }}
+      />
+      <RemindersDialog
+        open={Boolean(reminderTaskId)}
+        initialTaskId={reminderTaskId ?? undefined}
+        tasks={tasks.filter((task) => task.status === "in-progress" || task.status === "todo" || task.status === "blocked").map((task) => ({ id: task.id, title: task.title }))}
+        onClose={() => setReminderTaskId(null)}
+        onChanged={() => useTaskStore.getState().load()}
       />
     </div>
   );

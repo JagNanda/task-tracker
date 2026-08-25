@@ -37,8 +37,9 @@ import {
 import { NotesViewerModal } from "./NotesViewerModal";
 import { type TaskNote, useTaskNotesStore } from "./notesStore";
 import { databaseStatus, useTaskStore } from "./taskStore";
-import { entryMinutes, localDateKey, useTimelineStore } from "../timeline/timelineStore";
+import { entryMinutes, formatClock, formatDuration, localDateKey, type TimelineActivity, useTimelineStore } from "../timeline/timelineStore";
 import { settingsService } from "../../data/services/settingsService";
+import { RemindersDialog } from "../reminders/RemindersDialog";
 
 export type TaskStatus = "in-progress" | "todo" | "blocked" | "completed" | "cancelled" | "archived";
 type StatusFilter = "active" | "blocked" | "completed" | "cancelled" | "archived";
@@ -47,6 +48,8 @@ type SortOption = "Recently Worked On" | "Recently Created" | "Reminder Time" | 
 
 type TaskReminder = {
   label: string;
+  message?: string;
+  scheduledFor?: number;
   sortValue: number;
   overdue?: boolean;
 };
@@ -463,21 +466,27 @@ function TaskSection({
 export function TaskDetailsPopup({
   task,
   notes,
+  entries,
   focusing,
   onClose,
   onStart,
   onAction,
   onAddNote,
   onViewNotes,
+  onViewHistory,
+  onStatusChange,
 }: {
   task: FlowoTask | null;
   notes: TaskNote[];
+  entries: TimelineActivity[];
   focusing: boolean;
   onClose: () => void;
   onStart: () => void;
   onAction: (action: string) => void;
   onAddNote: () => void;
   onViewNotes: () => void;
+  onViewHistory: () => void;
+  onStatusChange: (status: TaskStatus) => void;
 }) {
   useEffect(() => {
     if (!task) return;
@@ -490,11 +499,18 @@ export function TaskDetailsPopup({
 
   const workEligible = task.status === "in-progress" || task.status === "todo" || task.status === "blocked";
   const tags = task.context.split(" / ");
-  const history = task.totalMinutes > 0 ? [
-    { date: "Today, 9:04 AM – 10:16 AM", duration: formatMinutes(Math.min(72, task.totalMinutes)), notes: Math.min(2, task.noteCount) },
-    { date: "Yesterday, 10:43 AM – 11:41 AM", duration: formatMinutes(Math.min(58, Math.max(15, task.totalMinutes - 72))), notes: task.noteCount ? 1 : 0 },
-    { date: "May 15, 1:30 PM – 2:05 PM", duration: formatMinutes(Math.min(35, Math.max(10, task.totalMinutes - 130))), notes: task.noteCount ? 1 : 0 },
-  ] : [];
+  const taskEntries = entries
+    .filter((entry) => entry.type === "focus" && entry.taskId === task.id && !entry.cancelled && entry.endedAt !== undefined)
+    .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+  const todayEntries = taskEntries.filter((entry) => entry.date === localDateKey());
+  const latest = taskEntries[0];
+  const sessionCount = new Set(taskEntries.map((entry) => entry.sessionId ?? entry.id)).size;
+  const todaySessionCount = new Set(todayEntries.map((entry) => entry.sessionId ?? entry.id)).size;
+  const entryDate = (entry: TimelineActivity) => {
+    const date = new Date(entry.startedAt ?? new Date(`${entry.date}T00:00:00`).getTime());
+    if (entry.date === localDateKey()) return "Today";
+    return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: date.getFullYear() === new Date().getFullYear() ? undefined : "numeric" }).format(date);
+  };
 
   return createPortal(
     <div className="task-details-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -509,60 +525,60 @@ export function TaskDetailsPopup({
         </header>
 
         <div className="task-details-popup__tags">
-          <button className={`task-details-popup__status task-details-popup__status--${task.status}`} type="button">
-            <span /> {statusLabels[task.status]} <ChevronDown size={13} />
-          </button>
+          <label className={`task-details-popup__status task-details-popup__status--${task.status}`}>
+            <span /><select aria-label="Task status" value={task.status} onChange={(event) => onStatusChange(event.target.value as TaskStatus)}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><ChevronDown size={13} />
+          </label>
           {tags.map((tag) => <Badge key={tag}>{tag}</Badge>)}
         </div>
 
         <section className="task-details-metrics" aria-label="Task metrics">
-          <div><span className="metric-icon metric-icon--blue"><Clock3 size={16} /></span><p>Total Focus Time<strong>{formatMinutes(task.totalMinutes)}</strong><small>Across 6 sessions</small></p></div>
-          <div><span className="metric-icon metric-icon--green"><Clock3 size={16} /></span><p>Today's Time<strong>{formatMinutes(task.todayMinutes)}</strong><small>{task.todayMinutes ? "3 sessions today" : "No sessions today"}</small></p></div>
-          <div><span className="metric-icon metric-icon--purple"><Clock3 size={16} /></span><p>Last Session<strong>{task.todayMinutes ? formatMinutes(Math.min(42, task.todayMinutes)) : "—"}</strong><small>{task.todayMinutes ? "Today, 1:30 PM" : "No sessions yet"}</small></p></div>
-          <div><span className="metric-icon"><CalendarDays size={16} /></span><p>Last Worked On<strong>{task.totalMinutes ? "Today" : "Not yet"}</strong><small>{task.totalMinutes ? "May 15, 2024" : "Start a focus session"}</small></p></div>
+          <div><span className="metric-icon metric-icon--blue"><Clock3 size={16} /></span><p>Total Focus Time<strong>{formatMinutes(task.totalMinutes)}</strong><small>Across {sessionCount} session{sessionCount === 1 ? "" : "s"}</small></p></div>
+          <div><span className="metric-icon metric-icon--green"><Clock3 size={16} /></span><p>Today's Time<strong>{formatMinutes(task.todayMinutes)}</strong><small>{todaySessionCount ? `${todaySessionCount} session${todaySessionCount === 1 ? "" : "s"} today` : "No sessions today"}</small></p></div>
+          <div><span className="metric-icon metric-icon--purple"><Clock3 size={16} /></span><p>Last Session<strong>{latest ? formatDuration(entryMinutes(latest)) : "—"}</strong><small>{latest ? `${entryDate(latest)}, ${formatClock(latest.startMinutes)}` : "No sessions yet"}</small></p></div>
+          <div><span className="metric-icon"><CalendarDays size={16} /></span><p>Last Worked On<strong>{latest ? entryDate(latest) : "Not yet"}</strong><small>{latest ? formatClock(latest.startMinutes) : "Start a focus session"}</small></p></div>
         </section>
 
         <div className="task-details-popup__actions">
           {workEligible && <Button tone="primary" onClick={onStart}>{focusing ? <><Pause size={14} fill="currentColor" /> Focusing Now</> : <><Play size={14} fill="currentColor" /> Start Focus</>}</Button>}
           {workEligible && <Button onClick={() => onAction("Switch Task")}><SwitchCamera size={15} /> Switch Task</Button>}
-          <Button onClick={() => onAction(task.status === "completed" ? "Reopen" : "Mark Complete")}><Check size={15} /> {task.status === "completed" ? "Reopen Task" : "Mark Complete"}</Button>
+          {task.status === "completed" || task.status === "cancelled" || task.status === "archived" ? <Button onClick={() => onAction(task.status === "archived" ? "Restore" : "Reopen")}><Check size={15} /> {task.status === "archived" ? "Restore Task" : "Reopen Task"}</Button> : <Button onClick={() => onAction("Mark Complete")}><Check size={15} /> Mark Complete</Button>}
           {workEligible && <Button className="is-danger" onClick={() => onAction("Cancel Task")}><X size={15} /> Cancel Task</Button>}
-          <Button onClick={() => onAction("Archive")}><Archive size={15} /> Archive Task</Button>
+          {task.status !== "archived" && <Button onClick={() => onAction("Archive")}><Archive size={15} /> Archive Task</Button>}
         </div>
 
         <div className="task-details-grid">
           <section className="task-details-card">
-            <header><h3>Reminders <small>{task.reminderCount}</small></h3><button type="button" onClick={() => onAction("Add Reminder")}>+ Add Reminder</button></header>
+            <header><h3>Reminders <small>{task.reminderCount}</small></h3><button type="button" onClick={() => onAction("Add Reminder")}>{task.reminderCount ? "Manage reminders" : "+ Add Reminder"}</button></header>
             <div className="task-detail-reminders">
               {task.reminder ? (
-                <article><span><Bell size={16} /></span><div><strong>{task.reminder.label}</strong><p>{task.reminder.overdue ? "This reminder is overdue" : "Next scheduled reminder"}</p></div><small>{task.reminder.overdue ? "Overdue" : "Upcoming"}</small></article>
+                <article><span><Bell size={16} /></span><div><strong>{task.reminder.label}</strong><p>{task.reminder.message || (task.reminder.overdue ? "This reminder is overdue" : "Next scheduled reminder")}</p></div><small>{task.reminder.overdue ? "Overdue" : "Upcoming"}</small></article>
               ) : <p className="task-details-empty">No reminders scheduled.</p>}
-              {task.reminderCount > 1 && <article><span><Bell size={16} /></span><div><strong>Tomorrow, 11:00 AM</strong><p>Follow up on this task</p></div><small>Tomorrow</small></article>}
+              {task.reminderCount > 1 && <button className="task-details-card__footer" type="button" onClick={() => onAction("Add Reminder")}>View all {task.reminderCount} reminders</button>}
             </div>
           </section>
 
           <section className="task-details-card">
             <header><h3>Notes <small>{task.noteCount}</small></h3><button type="button" onClick={onAddNote}>+ Add Note</button></header>
             <div className="task-detail-note-list">
-              {notes.map((note, index) => <button className="task-detail-note-item" type="button" key={note.id} onClick={onViewNotes}><div><ChevronDown className={index ? "is-collapsed" : ""} size={14} /><strong>{note.body}</strong></div><time>{note.updatedAt}</time>{index === 0 && <p>{task.description}</p>}{note.attachments.length > 0 && <small><ImageIcon size={12} /> {note.attachments.length}</small>}</button>)}
+              {notes.map((note, index) => <button className="task-detail-note-item" type="button" key={note.id} onClick={onViewNotes}><div><ChevronDown className={index ? "is-collapsed" : ""} size={14} /><strong>{note.body}</strong></div><time>{note.updatedAt}</time>{note.attachments.length > 0 && <small><ImageIcon size={12} /> {note.attachments.length}</small>}</button>)}
               {!notes.length && <p className="task-details-empty">No notes yet.</p>}
             </div>
             {notes.length > 0 && <button className="task-details-card__footer" type="button" onClick={onViewNotes}>View all notes</button>}
           </section>
 
           <section className="task-details-card">
-            <header><h3>Work History</h3><button type="button">View full history</button></header>
+            <header><h3>Work History</h3><button type="button" onClick={onViewHistory}>Open in Timeline</button></header>
             <div className="task-history-list">
-              {history.map((entry) => <article key={entry.date}><span /><div><strong>{entry.date}</strong><small>Focus session</small></div><b>{entry.duration}</b><small><MessageSquareText size={12} /> {entry.notes}</small></article>)}
-              {!history.length && <p className="task-details-empty">No focus sessions yet.</p>}
+              {taskEntries.slice(0, 5).map((entry) => <article key={entry.id}><span /><div><strong>{entryDate(entry)}, {formatClock(entry.startMinutes)} – {formatClock(entry.endMinutes)}</strong><small>Focus session</small></div><b>{formatDuration(entryMinutes(entry))}</b><small><MessageSquareText size={12} /> {entry.note ? 1 : 0}</small></article>)}
+              {!taskEntries.length && <p className="task-details-empty">No focus sessions yet.</p>}
             </div>
           </section>
 
           <section className="task-details-card task-details-description">
             <header><h3>Description / Context</h3><button type="button" onClick={() => onAction("Edit")} aria-label="Edit description"><Pencil size={15} /></button></header>
             <p>{task.description}</p>
-            <strong>Task checklist</strong>
-            <ul><li>Review the current context</li><li>Complete the next focused work block</li><li>Capture decisions in notes</li><li>Confirm the final result</li></ul>
+            <strong>Context</strong>
+            <ul>{tags.map((tag) => <li key={tag}>{tag}</li>)}</ul>
           </section>
         </div>
       </section>
@@ -576,7 +592,6 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
   const createPersistentTask = useTaskStore((state) => state.createTask);
   const updatePersistentTask = useTaskStore((state) => state.updateTask);
   const setPersistentTaskStatus = useTaskStore((state) => state.setStatus);
-  const addPersistentReminder = useTaskStore((state) => state.addReminder);
   const deletePersistentTask = useTaskStore((state) => state.deletePermanently);
   const timelineEntries = useTimelineStore((state) => state.entries);
   const [filter, setFilter] = useState<StatusFilter>("active");
@@ -588,13 +603,23 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
     if (requested) window.sessionStorage.removeItem("flowo:tasks-open");
     return requested;
   });
+  const [requestedReveal] = useState<string | null>(() => {
+    const requested = window.sessionStorage.getItem("flowo:tasks-reveal");
+    if (requested) window.sessionStorage.removeItem("flowo:tasks-reveal");
+    return requested;
+  });
+  const [requestedAction] = useState<"edit" | "reminder" | "note" | null>(() => {
+    const requested = window.sessionStorage.getItem("flowo:tasks-action");
+    if (requested) window.sessionStorage.removeItem("flowo:tasks-action");
+    return requested === "edit" || requested === "reminder" || requested === "note" ? requested : null;
+  });
   const [createOpen, setCreateOpen] = useState(false);
+  const [reminderTaskId, setReminderTaskId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const [draftContext, setDraftContext] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
   const [draftStatus, setDraftStatus] = useState<TaskStatus>("todo");
-  const [draftReminder, setDraftReminder] = useState("");
   const [notice, setNotice] = useState("");
   const [taskPreferences, setTaskPreferences] = useState({
     defaultStatus: "todo" as "todo" | "in_progress",
@@ -648,6 +673,53 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
   }, []);
 
   useEffect(() => {
+    if (!requestedAction || !selectedTask) return;
+    if (requestedAction === "reminder") {
+      setReminderTaskId(selectedTask.id);
+      return;
+    }
+    if (requestedAction === "note") {
+      setNoteComposer({ mode: "create", taskId: selectedTask.id });
+      return;
+    }
+    setEditingId(selectedTask.id);
+    setDraftTitle(selectedTask.title);
+    setDraftContext(selectedTask.context);
+    setDraftDescription(selectedTask.description);
+    setDraftStatus(selectedTask.status);
+    setCreateOpen(true);
+  }, [requestedAction, selectedTask?.id]);
+
+  useEffect(() => {
+    if (!requestedReveal) return;
+    const task = tasksWithNoteCounts.find((item) => item.id === requestedReveal);
+    if (!task) return;
+    setSelectedId(null);
+    setQuery(task.title);
+    setFilter(task.status === "blocked" || task.status === "completed" || task.status === "cancelled" || task.status === "archived" ? task.status : "active");
+  }, [requestedReveal, tasksWithNoteCounts]);
+
+  useEffect(() => {
+    const openFromReminder = (event: Event) => {
+      const detail = (event as CustomEvent<{ taskId?: string; behavior?: "popup" | "tasks" }>).detail;
+      if (!detail?.taskId) return;
+      window.sessionStorage.removeItem("flowo:tasks-open");
+      window.sessionStorage.removeItem("flowo:tasks-reveal");
+      if (detail.behavior === "popup") {
+        setSelectedId(detail.taskId);
+        return;
+      }
+      const task = tasksWithNoteCounts.find((item) => item.id === detail.taskId);
+      if (!task) return;
+      setSelectedId(null);
+      setQuery(task.title);
+      setFilter(task.status === "blocked" || task.status === "completed" || task.status === "cancelled" || task.status === "archived" ? task.status : "active");
+    };
+    window.addEventListener("flowo:open-task", openFromReminder);
+    return () => window.removeEventListener("flowo:open-task", openFromReminder);
+  }, [tasksWithNoteCounts]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!taskPreferences.shortcutsEnabled) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
@@ -656,7 +728,7 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
         return;
       }
       if (event.key === "Escape" && selectedId) {
-        if (noteComposer || notesViewerTaskId || createOpen) return;
+        if (noteComposer || notesViewerTaskId || createOpen || reminderTaskId) return;
         setSelectedId(null);
         return;
       }
@@ -671,7 +743,7 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [createOpen, noteComposer, notesViewerTaskId, selectedId, taskPreferences.shortcutsEnabled]);
+  }, [createOpen, noteComposer, notesViewerTaskId, reminderTaskId, selectedId, taskPreferences.shortcutsEnabled]);
 
   useEffect(() => {
     if (!notice) return;
@@ -729,7 +801,6 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
     setDraftContext("");
     setDraftDescription("");
     setDraftStatus(taskPreferences.defaultStatus === "in_progress" ? "in-progress" : "todo");
-    setDraftReminder("");
     setCreateOpen(true);
   };
 
@@ -739,7 +810,6 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
     setDraftContext(task.context);
     setDraftDescription(task.description);
     setDraftStatus(task.status);
-    setDraftReminder(task.reminder?.label ?? "");
     setCreateOpen(true);
   };
 
@@ -755,15 +825,13 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
         context: draftContext.trim() || "Unsorted / General",
         description: draftDescription.trim() || "No description yet.",
         status: draftStatus,
-        reminder: draftReminder.trim() ? { label: draftReminder.trim(), sortValue: 720 } : undefined,
-        reminderCount: draftReminder.trim() ? Math.max(1, existingTask.reminderCount) : 0,
       };
       await updatePersistentTask(editingId, {
         title: savedTask.title,
         context: savedTask.context,
         description: savedTask.description,
         status: databaseStatus[savedTask.status],
-      }, draftReminder);
+      });
       setCreateOpen(false);
       flash("Task updated.");
       if (shouldStart) await startFocus(savedTask);
@@ -775,7 +843,7 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
       context: draftContext.trim() || "Unsorted / General",
       description: draftDescription.trim() || "No description yet.",
       status: databaseStatus[startAfterCreate ? "in-progress" : draftStatus],
-    }, draftReminder);
+    });
     const task: FlowoTask = {
       id: taskId,
       title,
@@ -784,8 +852,7 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
       status: startAfterCreate ? "in-progress" : draftStatus,
       totalMinutes: 0,
       todayMinutes: 0,
-      reminder: draftReminder.trim() ? { label: draftReminder.trim(), sortValue: 720 } : undefined,
-      reminderCount: draftReminder.trim() ? 1 : 0,
+      reminderCount: 0,
       noteCount: 0,
       createdOrder: Date.now(),
       workedOrder: Date.now(),
@@ -799,7 +866,6 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
 
   const performAction = async (task: FlowoTask, action: string) => {
     if (action === "Edit") {
-      setSelectedId(null);
       openEdit(task);
       return;
     }
@@ -812,8 +878,7 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
       return;
     }
     if (action === "Add Reminder") {
-      await addPersistentReminder(task.id, "Reminder");
-      flash(`Reminder added to ${task.title}.`);
+      setReminderTaskId(task.id);
       return;
     }
     const statusByAction: Record<string, TaskStatus> = {
@@ -859,6 +924,13 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
   const countFor = (status: StatusFilter) => status === "active"
     ? tasks.filter((task) => task.status === "in-progress" || task.status === "todo" || task.status === "blocked").length
     : tasks.filter((task) => task.status === status).length;
+
+  const changeStatus = async (task: FlowoTask, status: TaskStatus) => {
+    if (status === task.status) return;
+    if (status === "cancelled" && taskPreferences.confirmCancel && !window.confirm(`Cancel “${task.title}”? Tracked history will be preserved.`)) return;
+    await setPersistentTaskStatus(task.id, status);
+    flash(`${task.title} marked ${statusLabels[status].toLowerCase()}.`);
+  };
 
   const filterButtons: Array<{ id: StatusFilter; label: string; icon?: React.ReactNode }> = [
     { id: "active", label: "Active" },
@@ -968,12 +1040,28 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
       <TaskDetailsPopup
         task={selectedTask}
         notes={selectedTask ? notesByTask[selectedTask.id] ?? [] : []}
+        entries={timelineEntries}
         focusing={Boolean(selectedTask && focusingId === selectedTask.id)}
         onClose={() => setSelectedId(null)}
         onStart={() => selectedTask && startFocus(selectedTask)}
         onAction={(action) => selectedTask && performAction(selectedTask, action)}
         onAddNote={() => selectedTask && openAddNote(selectedTask.id)}
         onViewNotes={() => selectedTask && setNotesViewerTaskId(selectedTask.id)}
+        onViewHistory={() => {
+          if (!selectedTask) return;
+          window.sessionStorage.setItem("flowo:timeline-jump", JSON.stringify({ filter: "focus", taskFilter: selectedTask.id }));
+          setSelectedId(null);
+          onNavigate?.("Timeline");
+        }}
+        onStatusChange={(status) => { if (selectedTask) void changeStatus(selectedTask, status); }}
+      />
+
+      <RemindersDialog
+        open={Boolean(reminderTaskId)}
+        initialTaskId={reminderTaskId ?? undefined}
+        tasks={tasks.filter((task) => task.status === "in-progress" || task.status === "todo" || task.status === "blocked").map((task) => ({ id: task.id, title: task.title }))}
+        onClose={() => setReminderTaskId(null)}
+        onChanged={() => useTaskStore.getState().load()}
       />
 
       {notesViewerTaskId && !noteComposer && (() => {
@@ -1005,20 +1093,14 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
             <span>Description <small>optional</small></span>
             <textarea value={draftDescription} onChange={(event) => setDraftDescription(event.target.value)} placeholder="Add just enough detail to get started" />
           </label>
-          <div className="task-create-form__split">
-            <label>
-              <span>Initial status</span>
-              <select value={draftStatus} onChange={(event) => setDraftStatus(event.target.value as TaskStatus)}>
-                <option value="todo">To Do</option>
-                <option value="in-progress">In Progress</option>
-                <option value="blocked">Blocked</option>
-              </select>
-            </label>
-            <label>
-              <span>Reminder <small>optional</small></span>
-              <Input value={draftReminder} onChange={(event) => setDraftReminder(event.target.value)} placeholder="Tomorrow 9:00 AM" />
-            </label>
-          </div>
+          <label>
+            <span>Initial status</span>
+            <select value={draftStatus} onChange={(event) => setDraftStatus(event.target.value as TaskStatus)}>
+              <option value="todo">To Do</option>
+              <option value="in-progress">In Progress</option>
+              <option value="blocked">Blocked</option>
+            </select>
+          </label>
           <div className="modal-actions task-create-form__actions">
             <Button type="button" onClick={() => setCreateOpen(false)}>Cancel</Button>
             <Button type="submit">{editingId ? "Save Task" : "Create"}</Button>

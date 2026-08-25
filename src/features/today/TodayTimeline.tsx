@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, Coffee, Info, SlidersHorizontal, Zap } from "lucide-react";
-import { Badge, Button, Card, Popover, Select } from "../../cdk";
+import { Badge, Button, Card, Popover } from "../../cdk";
 import { useTodayStore } from "./store";
 import type { TimelineEntry } from "./types";
 import { formatClock, formatDuration, localDateKey, useTimelineStore } from "../timeline/timelineStore";
@@ -8,7 +8,6 @@ import { formatClock, formatDuration, localDateKey, useTimelineStore } from "../
 type FilterValue = "All" | "Focus" | "Interruptions" | "Breaks";
 
 export function TimelineToolbar({ filter, onFilter }: { filter: FilterValue; onFilter: (filter: FilterValue) => void }) {
-  const [period, setPeriod] = useState("Day");
   return (
     <div className="timeline-toolbar">
       <Popover
@@ -21,7 +20,6 @@ export function TimelineToolbar({ filter, onFilter }: { filter: FilterValue; onF
           </button>
         ))}
       </Popover>
-      <Select label="Timeline range" value={period} options={["Day"]} onChange={setPeriod} />
     </div>
   );
 }
@@ -65,6 +63,7 @@ export function TodayTimeline() {
     if (filter === "Breaks") return entry.type === "Break";
     return entry.type === "Focus";
   }), [entries, filter]);
+  const visible = expanded ? filtered : filtered.slice(-5);
 
   return (
     <Card className="timeline-card">
@@ -73,12 +72,12 @@ export function TodayTimeline() {
         <TimelineToolbar filter={filter} onFilter={setFilter} />
       </header>
       <div className="timeline-list">
-        {filtered.map((entry) => <TimelineRow key={entry.id} entry={entry} />)}
+        {visible.map((entry) => <TimelineRow key={entry.id} entry={entry} />)}
+        {!visible.length && <p className="timeline-empty">No activity matches this filter.</p>}
       </div>
-      <button className="show-more" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
-        {expanded ? "Show less" : "Show more"} <ChevronDown size={16} className={expanded ? "is-rotated" : ""} />
-      </button>
-      {expanded && <p className="timeline-empty">No earlier entries in this prototype.</p>}
+      {filtered.length > 5 && <button className="show-more" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
+        {expanded ? "Show recent only" : `Show ${filtered.length - 5} earlier`} <ChevronDown size={16} className={expanded ? "is-rotated" : ""} />
+      </button>}
     </Card>
   );
 }

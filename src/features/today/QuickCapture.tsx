@@ -8,7 +8,7 @@ export function QuickCapture() {
   const captureTask = useTodayStore((state) => state.captureTask);
   const interrupt = useTodayStore((state) => state.interrupt);
   const mode = useTodayStore((state) => state.mode);
-  const activeSession = mode === "focusing" || mode === "paused" || mode === "interrupted";
+  const activeSession = mode === "focusing" || mode === "paused" || mode === "interrupted" || mode === "break";
   const openTaskPicker = () => window.dispatchEvent(new Event("flowo:switch-task"));
 
   return (
@@ -23,7 +23,7 @@ export function QuickCapture() {
       />
       <Button tone="primary" type="submit" disabled={!draft.trim()}>{activeSession ? <Repeat2 size={15} /> : <Play size={15} fill="currentColor" />} {activeSession ? "Create & Switch" : "Create & Focus"}</Button>
       <Button type="button" onClick={openTaskPicker}><ListChecks size={15} /> Choose Existing</Button>
-      <Button type="button" onClick={interrupt} disabled={mode === "idle" || mode === "interrupted"}><Zap size={15} fill="currentColor" /> Interrupt</Button>
+      <Button type="button" onClick={interrupt} disabled={mode !== "focusing"}><Zap size={15} fill="currentColor" /> Interrupt</Button>
     </form>
   );
 }

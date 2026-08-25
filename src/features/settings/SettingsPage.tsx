@@ -60,6 +60,7 @@ import {
 } from "./SettingsComponents";
 import { defaultSettings, type SettingKey, type SettingsState } from "./settingsDefaults";
 import { applyAppTheme, contrastRatio, readableText } from "../../theme";
+import { completionSoundOptions, playCompletionSound } from "../../audio/completionSounds";
 
 type SettingsCategory = "appearance" | "focus" | "interruptions" | "reminders" | "reports" | "notifications" | "desktop" | "shortcuts" | "data" | "tasks" | "timeline" | "about";
 type UpdateSetting = <K extends SettingKey>(key: K, value: SettingsState[K]) => Promise<void>;
@@ -173,6 +174,7 @@ function FocusSettings({ values, update }: SectionProps) {
       <div className="settings-two-column">
         <div className="setting-group">
           <SettingRow title="Default focus duration" description="Used when a new focus session starts."><NativeSelect label="Default focus duration" value={values["focus.defaultDuration"]} options={[15, 25, 50, 75, 90].map((value) => ({ value, label: `${value} minutes` }))} onChange={(value) => void update("focus.defaultDuration", Number(value))} /></SettingRow>
+          <SettingRow title="Break after each session" description="Starts automatically when a focus session is completed."><NativeSelect label="Automatic break duration" value={values["focus.breakDuration"]} options={[1, 5, 10, 15, 20, 30, 45, 60].map((value) => ({ value, label: `${value} minute${value === 1 ? "" : "s"}` }))} onChange={(value) => void update("focus.breakDuration", Number(value))} /></SettingRow>
           <SettingRow title="Session summary" description="Every focus session requires a short summary before it can be completed."><span className="setting-required-label"><LockKeyhole size={13} /> Required</span></SettingRow>
           <ToggleRow title="Play sound when session ends" description="Play a sound when a focus session completes." checked={values["notifications.focusSound"]} onChange={(value) => void update("notifications.focusSound", value)} />
           <ToggleRow title="Show Windows notification when session ends" description="Display a native notification when focus completes." checked={values["notifications.focusComplete"]} onChange={(value) => void update("notifications.focusComplete", value)} />
@@ -325,7 +327,20 @@ function NotificationSettings({ values, update, notify }: SectionProps) {
       <div className="setting-group">
         <ToggleRow title="Focus completed" checked={values["notifications.focusComplete"]} onChange={(value) => void update("notifications.focusComplete", value)} disabled={!available} />
         <ToggleRow title="Task reminders" checked={values["notifications.reminders"]} onChange={(value) => void update("notifications.reminders", value)} disabled={!available} />
-        <ToggleRow title="Focus completion sound" checked={values["notifications.focusSound"]} onChange={(value) => void update("notifications.focusSound", value)} />
+        <ToggleRow title="Focus completion sound" description="Play when a focus session is saved." checked={values["notifications.focusSound"]} onChange={(value) => void update("notifications.focusSound", value)} />
+        <SettingRow title="Focus sound" description="Choose the sound used after a completed session." disabled={!values["notifications.focusSound"]}>
+          <div className="completion-sound-control">
+            <NativeSelect label="Focus completion sound" value={values["notifications.focusSoundStyle"]} options={[...completionSoundOptions]} onChange={(value) => void update("notifications.focusSoundStyle", value)} disabled={!values["notifications.focusSound"]} />
+            <Button size="sm" disabled={!values["notifications.focusSound"]} onClick={() => void playCompletionSound(values["notifications.focusSoundStyle"])}><Volume2 size={13} /> Preview</Button>
+          </div>
+        </SettingRow>
+        <ToggleRow title="Break completion sound" description="Play when the automatic break countdown finishes." checked={values["notifications.breakSound"]} onChange={(value) => void update("notifications.breakSound", value)} />
+        <SettingRow title="Break sound" description="Choose a distinct sound for the end of a break." disabled={!values["notifications.breakSound"]}>
+          <div className="completion-sound-control">
+            <NativeSelect label="Break completion sound" value={values["notifications.breakSoundStyle"]} options={[...completionSoundOptions]} onChange={(value) => void update("notifications.breakSoundStyle", value)} disabled={!values["notifications.breakSound"]} />
+            <Button size="sm" disabled={!values["notifications.breakSound"]} onClick={() => void playCompletionSound(values["notifications.breakSoundStyle"])}><Volume2 size={13} /> Preview</Button>
+          </div>
+        </SettingRow>
         <ToggleRow title="Reminder sound" checked={values["notifications.reminderSound"]} onChange={(value) => void update("notifications.reminderSound", value)} />
         <div className="settings-inline-actions"><Button disabled={!available} onClick={() => void test()}><BellRing size={14} /> Send test notification</Button>{!available && <small>Native notifications are unavailable in this environment.</small>}</div>
       </div>
@@ -445,7 +460,11 @@ function AboutSettings({ database, onOpenFolder, notify }: { database: DatabaseH
 }
 
 export function SettingsPage({ onNavigate }: { onNavigate?: (label: string) => void }) {
-  const [selected, setSelected] = useState<SettingsCategory>("appearance");
+  const [selected, setSelected] = useState<SettingsCategory>(() => {
+    const requested = window.sessionStorage.getItem("flowo:settings-section");
+    if (requested) window.sessionStorage.removeItem("flowo:settings-section");
+    return settingsNavigation.some((item) => item.id === requested) ? requested as SettingsCategory : "appearance";
+  });
   const [values, setValues] = useState<SettingsState>({ ...defaultSettings, "focus.quickDurations": [...defaultSettings["focus.quickDurations"]], "reminders.snoozeOptions": [...defaultSettings["reminders.snoozeOptions"]] });
   const [database, setDatabase] = useState<DatabaseHealth | null>(null);
   const [loaded, setLoaded] = useState(false);

@@ -61,6 +61,7 @@ function fromRecord(record: TimelineRecord): TimelineActivity {
     context: record.context ?? undefined,
     reason: record.category ?? undefined,
     note: record.note ?? undefined,
+    cancelled: Boolean(record.is_cancelled),
     sessionId: record.focus_session_id ?? undefined,
     startedAt: record.started_at,
     endedAt: record.ended_at ?? undefined,
@@ -73,11 +74,15 @@ function timestamp(dateKey: string, minutes: number) {
 }
 
 async function persistEntry(entry: TimelineActivity, creating: boolean) {
-  const common = { startedAt: timestamp(entry.date, entry.startMinutes), endedAt: timestamp(entry.date, entry.endMinutes) };
+  const common = {
+    startedAt: timestamp(entry.date, entry.startMinutes),
+    endedAt: timestamp(entry.date, entry.endMinutes),
+    cancelled: Boolean(entry.cancelled),
+  };
   if (entry.type === "focus") {
     return creating
-      ? timelineRepository.work.createManual({ id: entry.id, taskId: entry.taskId, ...common })
-      : timelineRepository.work.update(entry.id, { taskId: entry.taskId, ...common });
+      ? timelineRepository.work.createManual({ id: entry.id, taskId: entry.taskId, note: entry.note, ...common })
+      : timelineRepository.work.update(entry.id, { taskId: entry.taskId, note: entry.note, ...common });
   }
   if (entry.type === "interruption") {
     const presetId = await interruptionService.ensurePreset(entry.reason || "Other");
