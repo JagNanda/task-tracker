@@ -12,7 +12,6 @@ import { RemindersDialog } from "../reminders/RemindersDialog";
 import { useTaskStore } from "../tasks/taskStore";
 
 export function TodayPage({ onNavigate }: { onNavigate?: (label: string) => void }) {
-  const initialize = useTodayStore((state) => state.initialize);
   const refreshDashboard = useTodayStore((state) => state.refreshDashboard);
   const mode = useTodayStore((state) => state.mode);
   const togglePause = useTodayStore((state) => state.togglePause);
@@ -21,9 +20,8 @@ export function TodayPage({ onNavigate }: { onNavigate?: (label: string) => void
   const tasks = useTaskStore((state) => state.tasks);
 
   useEffect(() => {
-    void initialize();
     void settingsService.get<boolean>("shortcuts.enabled").then((enabled) => setShortcutsEnabled(enabled ?? true));
-  }, [initialize]);
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

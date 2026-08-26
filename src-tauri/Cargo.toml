@@ -1,6 +1,6 @@
 [package]
 name = "flowo"
-version = "0.1.4"
+version = "0.1.5"
 description = "A calm developer focus command center"
 authors = ["Flowo"]
 edition = "2021"

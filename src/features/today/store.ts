@@ -20,6 +20,7 @@ type PersistedTimerState = {
   breakStartedAt: number | null;
   breakEndsAt: number | null;
   focusExpiryAlerted: boolean;
+  completionHeld: boolean;
 };
 
 type TodayActions = {
@@ -37,6 +38,7 @@ type TodayActions = {
   startFocus: () => Promise<void>;
   startTask: (task: Task) => Promise<void>;
   cancelSession: () => Promise<void>;
+  requestCompletion: (heldAt?: number) => Promise<void>;
   completeSession: (completionNote: string) => Promise<void>;
   extendSession: (minutes: number) => Promise<void>;
   endBreak: () => Promise<void>;
@@ -73,6 +75,7 @@ const emptyState: TodayState & PersistedTimerState = {
   breakStartedAt: null,
   breakEndsAt: null,
   focusExpiryAlerted: false,
+  completionHeld: false,
 };
 
 async function alertFocusExpired(taskTitle?: string) {
@@ -120,13 +123,22 @@ function timerPatch(snapshot: FocusSnapshot, task: Task | null) {
     remainingSeconds: Math.max(0, Math.ceil(snapshot.targetDurationSeconds - focusedSeconds)),
     interruptionSeconds: snapshot.openActivity?.type === "interruption" ? Math.max(0, Math.floor((now - snapshot.openActivity.startedAt) / 1000)) : 0,
     focusedSecondsAtSync: focusedSeconds,
-    syncedAt: now,
+    syncedAt: snapshot.calculatedAt,
     activityStartedAt: snapshot.openActivity?.startedAt ?? null,
     breakId: null,
     breakStartedAt: null,
     breakEndsAt: null,
     focusExpiryAlerted: false,
+    completionHeld: snapshot.status === "paused" && snapshot.openActivity === null,
   } satisfies Partial<TodayState & PersistedTimerState>;
+}
+
+function focusExpiryTimestamp(snapshot: FocusSnapshot) {
+  if (snapshot.openActivity?.type !== "focus") return snapshot.calculatedAt;
+  const openFocusedMilliseconds = Math.max(0, snapshot.calculatedAt - snapshot.openActivity.startedAt);
+  const focusedBeforeOpen = Math.max(0, snapshot.focusedMilliseconds - openFocusedMilliseconds);
+  const remainingInOpenSegment = Math.max(1, snapshot.targetDurationSeconds * 1000 - focusedBeforeOpen);
+  return snapshot.openActivity.startedAt + remainingInOpenSegment;
 }
 
 function breakTimerPatch(activeBreak: { id: string; started_at: number; target_duration_seconds: number }) {
@@ -144,6 +156,7 @@ function breakTimerPatch(activeBreak: { id: string; started_at: number; target_d
     interruptionSeconds: 0,
     activityStartedAt: null,
     focusExpiryAlerted: false,
+    completionHeld: false,
   } satisfies Partial<TodayState & PersistedTimerState>;
 }
 
@@ -192,9 +205,15 @@ export const useTodayStore = create<TodayState & PersistedTimerState & TodayActi
     if (active) {
       if (activeBreak) void breakService.finish(activeBreak.id, active.startedAt);
       const taskRecord = useTaskStore.getState().tasks.find((task) => task.id === active.currentTaskId);
-      const timer = timerPatch(active, taskRecord ? uiTask(taskRecord) : null);
+      const expiredWhileAway = active.status === "active" && active.focusedMilliseconds >= active.targetDurationSeconds * 1000;
+      const restored = expiredWhileAway
+        ? await focusService.holdForCompletion(active.sessionId, focusExpiryTimestamp(active))
+        : active;
+      const timer = timerPatch(restored, taskRecord ? uiTask(taskRecord) : null);
       const preserveExpiryAlert = get().sessionId === active.sessionId && get().focusExpiryAlerted && timer.remainingSeconds === 0;
-      set({ ...dashboard, breakDurationMinutes: settings["focus.breakDuration"], ...timer, focusExpiryAlerted: preserveExpiryAlert });
+      const heldAtExpiry = Boolean(timer.completionHeld && timer.remainingSeconds === 0);
+      set({ ...dashboard, breakDurationMinutes: settings["focus.breakDuration"], ...timer, focusExpiryAlerted: expiredWhileAway || heldAtExpiry || preserveExpiryAlert });
+      if (expiredWhileAway) void alertFocusExpired(taskRecord?.title).catch((error) => console.error("Failed to announce focus timer completion", error));
       return;
     }
     if (activeBreak) {
@@ -217,6 +236,7 @@ export const useTodayStore = create<TodayState & PersistedTimerState & TodayActi
         breakId: null,
         breakStartedAt: null,
         breakEndsAt: null,
+        completionHeld: false,
       });
       if (settings["notifications.breakSound"]) await playCompletionSound(settings["notifications.breakSoundStyle"]);
       if (settings["notifications.focusComplete"] && await isPermissionGranted().catch(() => false)) {
@@ -235,6 +255,7 @@ export const useTodayStore = create<TodayState & PersistedTimerState & TodayActi
         totalSeconds: preferredDuration * 60,
         remainingSeconds: preferredDuration * 60,
         interruptionSeconds: 0,
+        completionHeld: false,
       });
       return;
     }
@@ -248,7 +269,13 @@ export const useTodayStore = create<TodayState & PersistedTimerState & TodayActi
       const remainingSeconds = Math.max(0, Math.ceil(state.totalSeconds - focused));
       if (remainingSeconds === 0 && !state.focusExpiryAlerted) {
         set({ remainingSeconds, focusExpiryAlerted: true });
-        void alertFocusExpired(state.currentTask?.title).catch((error) => console.error("Failed to announce focus timer completion", error));
+        const expiresAt = state.syncedAt + Math.max(1, (state.totalSeconds - state.focusedSecondsAtSync) * 1000);
+        void get().requestCompletion(expiresAt)
+          .then(() => alertFocusExpired(state.currentTask?.title))
+          .catch((error) => {
+            console.error("Failed to hold completed focus session", error);
+            set({ focusExpiryAlerted: false });
+          });
       } else {
         set({ remainingSeconds });
       }
@@ -286,7 +313,9 @@ export const useTodayStore = create<TodayState & PersistedTimerState & TodayActi
     const state = get();
     if (!state.sessionId) return;
     const snapshot = state.mode === "paused"
-      ? await focusService.resumeFocus(state.sessionId)
+      ? state.completionHeld
+        ? await focusService.resumeCompletionHold(state.sessionId)
+        : await focusService.resumeFocus(state.sessionId)
       : await focusService.pauseFocus(state.sessionId);
     set(timerPatch(snapshot, state.currentTask));
     set(await dashboardPatch());
@@ -306,7 +335,9 @@ export const useTodayStore = create<TodayState & PersistedTimerState & TodayActi
       const snapshot = await focusService.resumeFromInterruption(state.sessionId, presetId, null);
       set(timerPatch(snapshot, state.currentTask));
     } else if (state.mode === "paused") {
-      const snapshot = await focusService.resumeFocus(state.sessionId);
+      const snapshot = state.completionHeld
+        ? await focusService.resumeCompletionHold(state.sessionId)
+        : await focusService.resumeFocus(state.sessionId);
       set(timerPatch(snapshot, state.currentTask));
     }
     set(await dashboardPatch());
@@ -376,7 +407,15 @@ export const useTodayStore = create<TodayState & PersistedTimerState & TodayActi
       return;
     }
     if (state.sessionId) await focusService.cancelActiveFocus(state.sessionId);
-    set({ currentTask: null, mode: "idle", sessionId: null, remainingSeconds: state.selectedDuration * 60, interruptionSeconds: 0, focusExpiryAlerted: false });
+    set({ currentTask: null, mode: "idle", sessionId: null, remainingSeconds: state.selectedDuration * 60, interruptionSeconds: 0, focusExpiryAlerted: false, completionHeld: false });
+    set(await dashboardPatch());
+  },
+  requestCompletion: async (heldAt) => {
+    const state = get();
+    if (!state.sessionId || state.mode !== "focusing") return;
+    const snapshot = await focusService.holdForCompletion(state.sessionId, heldAt);
+    const expired = state.focusExpiryAlerted || state.remainingSeconds === 0;
+    set({ ...timerPatch(snapshot, state.currentTask), focusExpiryAlerted: expired, completionHeld: true });
     set(await dashboardPatch());
   },
   completeSession: async (completionNote) => {
@@ -403,6 +442,8 @@ export const useTodayStore = create<TodayState & PersistedTimerState & TodayActi
         remainingSeconds: state.selectedDuration * 60,
         totalSeconds: state.selectedDuration * 60,
         interruptionSeconds: 0,
+        completionHeld: false,
+        focusExpiryAlerted: false,
       });
     }
     if (announceCompletion && settings["notifications.focusSound"]) void playCompletionSound(settings["notifications.focusSoundStyle"]);
@@ -412,17 +453,25 @@ export const useTodayStore = create<TodayState & PersistedTimerState & TodayActi
   },
   extendSession: async (minutes) => {
     const state = get();
-    if (!state.sessionId || state.mode !== "focusing" || !Number.isFinite(minutes) || minutes <= 0) return;
+    if (!state.sessionId || (state.mode !== "focusing" && !state.completionHeld) || !Number.isFinite(minutes) || minutes <= 0) return;
     const now = Date.now();
-    const focusedSeconds = state.focusedSecondsAtSync + (now - state.syncedAt) / 1000;
+    const focusedSeconds = state.completionHeld
+      ? state.focusedSecondsAtSync
+      : state.focusedSecondsAtSync + (now - state.syncedAt) / 1000;
     const totalSeconds = Math.ceil(Math.max(state.totalSeconds, focusedSeconds) + Math.round(minutes * 60));
     await focusService.changeDuration(state.sessionId, totalSeconds);
+    if (state.completionHeld) {
+      const snapshot = await focusService.resumeCompletionHold(state.sessionId);
+      set({ ...timerPatch(snapshot, state.currentTask), focusExpiryAlerted: false, completionHeld: false });
+      return;
+    }
     set({
       totalSeconds,
       remainingSeconds: Math.max(1, Math.ceil(totalSeconds - focusedSeconds)),
       focusedSecondsAtSync: focusedSeconds,
       syncedAt: now,
       focusExpiryAlerted: false,
+      completionHeld: false,
     });
   },
   endBreak: async () => {
@@ -441,6 +490,7 @@ export const useTodayStore = create<TodayState & PersistedTimerState & TodayActi
       remainingSeconds: state.selectedDuration * 60,
       interruptionSeconds: 0,
       focusExpiryAlerted: false,
+      completionHeld: false,
     });
     set(await dashboardPatch());
   },

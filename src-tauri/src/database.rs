@@ -185,6 +185,7 @@ pub struct FocusMutationResult {
     started_at: i64,
     ended_at: Option<i64>,
     focused_milliseconds: i64,
+    calculated_at: i64,
     open_activity: Option<JsonValue>,
 }
 
@@ -1272,6 +1273,7 @@ fn focus_result(
         started_at,
         ended_at,
         focused_milliseconds,
+        calculated_at: now,
         open_activity,
     })
 }
@@ -1554,6 +1556,91 @@ pub fn focus_resume_pause(
     now: i64,
 ) -> Result<FocusMutationResult, String> {
     resume_with_activity(&state, &session_id, now, "paused", "breaks", None)
+}
+
+fn hold_focus_for_completion_locked(
+    connection: &mut Connection,
+    session_id: &str,
+    now: i64,
+) -> Result<FocusMutationResult, String> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    if session_status(&transaction, session_id)? != "active" {
+        return Err("only an active focus session can be held for completion".to_string());
+    }
+    close_all_open_activity(&transaction, session_id, now)?;
+    ensure_no_open_activity(&transaction, session_id)?;
+    transaction
+        .execute(
+            "UPDATE focus_sessions SET status = 'paused', updated_at = MAX(updated_at, ?2) WHERE id = ?1",
+            params![session_id, now],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    focus_result(connection, session_id, now)
+}
+
+#[tauri::command]
+pub fn focus_hold_for_completion(
+    state: State<'_, DatabaseState>,
+    session_id: String,
+    now: i64,
+) -> Result<FocusMutationResult, String> {
+    let mut guard = state_connection(&state)?;
+    let connection = guard
+        .as_mut()
+        .ok_or("database is temporarily unavailable")?;
+    hold_focus_for_completion_locked(connection, &session_id, now)
+}
+
+fn resume_completion_hold_locked(
+    connection: &mut Connection,
+    session_id: &str,
+    now: i64,
+) -> Result<FocusMutationResult, String> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    if session_status(&transaction, session_id)? != "paused" {
+        return Err("focus session is not held for completion".to_string());
+    }
+    ensure_no_open_activity(&transaction, session_id)?;
+    let task_id: Option<String> = transaction
+        .query_row(
+            "SELECT current_task_id FROM focus_sessions WHERE id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "UPDATE focus_sessions SET status = 'active', updated_at = ?2 WHERE id = ?1",
+            params![session_id, now],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "INSERT INTO work_segments (id, focus_session_id, task_id, started_at, source, created_at)\n\
+             VALUES (?1, ?2, ?3, ?4, 'timer', ?4)",
+            params![new_id("segment"), session_id, task_id, now],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    focus_result(connection, session_id, now)
+}
+
+#[tauri::command]
+pub fn focus_resume_completion_hold(
+    state: State<'_, DatabaseState>,
+    session_id: String,
+    now: i64,
+) -> Result<FocusMutationResult, String> {
+    let mut guard = state_connection(&state)?;
+    let connection = guard
+        .as_mut()
+        .ok_or("database is temporarily unavailable")?;
+    resume_completion_hold_locked(connection, &session_id, now)
 }
 
 #[tauri::command]
@@ -1920,6 +2007,38 @@ mod tests {
         connection.execute("INSERT INTO work_segments (id, focus_session_id, started_at, ended_at, source, created_at) VALUES ('two', 'session', 12_000, 20_000, 'timer', 12_000)", []).unwrap();
         let result = focus_result(&connection, "session", 20_000).unwrap();
         assert_eq!(result.focused_milliseconds, 13_000);
+    }
+
+    #[test]
+    fn completion_hold_freezes_focus_without_recording_a_break() {
+        let mut connection = migrated_connection();
+        connection.execute("INSERT INTO focus_sessions (id, target_duration_seconds, status, started_at, created_at, updated_at) VALUES ('session', 1500, 'active', 1_000, 1_000, 1_000)", []).unwrap();
+        connection.execute("INSERT INTO work_segments (id, focus_session_id, started_at, source, created_at) VALUES ('work', 'session', 1_000, 'timer', 1_000)", []).unwrap();
+
+        let held = hold_focus_for_completion_locked(&mut connection, "session", 11_000).unwrap();
+        assert_eq!(held.status, "paused");
+        assert_eq!(held.focused_milliseconds, 10_000);
+        assert_eq!(held.calculated_at, 11_000);
+        assert!(held.open_activity.is_none());
+
+        let breaks: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM breaks WHERE focus_session_id = 'session'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(breaks, 0);
+
+        let still_held = focus_result(&connection, "session", 20_000).unwrap();
+        assert_eq!(still_held.focused_milliseconds, 10_000);
+
+        let resumed = resume_completion_hold_locked(&mut connection, "session", 20_000).unwrap();
+        assert_eq!(resumed.status, "active");
+        assert_eq!(resumed.focused_milliseconds, 10_000);
+        let open_activity = resumed.open_activity.unwrap();
+        assert_eq!(open_activity["type"].as_str(), Some("focus"));
+        assert_eq!(open_activity["startedAt"].as_i64(), Some(20_000));
     }
 
     #[test]

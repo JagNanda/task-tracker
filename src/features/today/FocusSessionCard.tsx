@@ -21,7 +21,6 @@ import { formatClock } from "./utils";
 import { interruptionService } from "../../data/services/interruptionService";
 import { settingsService } from "../../data/services/settingsService";
 import { defaultSettings, type SettingsState } from "../settings/settingsDefaults";
-import { sessionNoteRepository } from "../../data/repositories/sessionNoteRepository";
 
 export function CurrentTaskHeader({ task, onEdit, mode }: { task: Task; onEdit: () => void; mode: string }) {
   const eyebrow = mode === "interrupted" ? "INTERRUPTED" : mode === "paused" ? "SESSION PAUSED" : mode === "ready" ? "READY TO FOCUS" : "FOCUSING ON";
@@ -272,20 +271,12 @@ export function FocusSessionCard({ onOpenSettings }: { onOpenSettings?: () => vo
   const setReason = useTodayStore((state) => state.setInterruptionReason);
   const setDuration = useTodayStore((state) => state.setDuration);
   const cancelSession = useTodayStore((state) => state.cancelSession);
-  const completeSession = useTodayStore((state) => state.completeSession);
-  const extendSession = useTodayStore((state) => state.extendSession);
+  const requestCompletion = useTodayStore((state) => state.requestCompletion);
   const [taskPickerOpen, setTaskPickerOpen] = useState(false);
-  const [finishOpen, setFinishOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [customDurationOpen, setCustomDurationOpen] = useState(false);
   const [interruptionReasonOpen, setInterruptionReasonOpen] = useState(false);
   const [interruptionReasonDraft, setInterruptionReasonDraft] = useState("");
-  const [completionNote, setCompletionNote] = useState("");
-  const [completionError, setCompletionError] = useState("");
-  const [completing, setCompleting] = useState(false);
-  const [extending, setExtending] = useState(false);
-  const [extensionMinutes, setExtensionMinutes] = useState(selectedDuration);
-  const [recentSummaries, setRecentSummaries] = useState<string[]>([]);
   const [interruptionPresets, setInterruptionPresets] = useState<string[]>([]);
   const [preferences, setPreferences] = useState<SettingsState>({ ...defaultSettings, "focus.quickDurations": [...defaultSettings["focus.quickDurations"]], "reminders.snoozeOptions": [...defaultSettings["reminders.snoozeOptions"]] });
   const [reasonModalPurpose, setReasonModalPurpose] = useState<"record" | "resume">("resume");
@@ -296,17 +287,6 @@ export function FocusSessionCard({ onOpenSettings }: { onOpenSettings?: () => vo
       setPreferences(settings);
     });
   }, []);
-
-  useEffect(() => {
-    if (!finishOpen || !task) return;
-    let current = true;
-    void sessionNoteRepository.listRecentForTask(task.id).then((notes) => {
-      if (current) setRecentSummaries(notes.map((note) => note.body));
-    }).catch(() => {
-      if (current) setRecentSummaries([]);
-    });
-    return () => { current = false; };
-  }, [finishOpen, task]);
 
   const beginInterruption = async () => {
     await interrupt();
@@ -326,45 +306,9 @@ export function FocusSessionCard({ onOpenSettings }: { onOpenSettings?: () => vo
     }
   };
   const finish = () => {
-    setCompletionError("");
-    setExtensionMinutes(selectedDuration);
-    setFinishOpen(true);
-  };
-
-  const continueFocusing = async () => {
-    if (remainingSeconds > 0) {
-      setFinishOpen(false);
-      return;
-    }
-    setExtending(true);
-    setCompletionError("");
-    try {
-      await extendSession(extensionMinutes);
-      setFinishOpen(false);
-    } catch (error) {
-      setCompletionError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setExtending(false);
-    }
-  };
-
-  const submitCompletion = async () => {
-    const summary = completionNote.trim();
-    if (!summary && preferences["focus.requireCompletionNote"]) {
-      setCompletionError("Add a quick summary of what you worked on.");
-      return;
-    }
-    setCompleting(true);
-    setCompletionError("");
-    try {
-      await completeSession(summary);
-      setCompletionNote("");
-      setFinishOpen(false);
-    } catch (error) {
-      setCompletionError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setCompleting(false);
-    }
+    void requestCompletion().catch((error) => {
+      console.error("Failed to pause focus tracking for completion", error);
+    });
   };
 
   useEffect(() => {
@@ -444,43 +388,6 @@ export function FocusSessionCard({ onOpenSettings }: { onOpenSettings?: () => vo
         <div className="modal-actions">
           <Button onClick={() => { if (reasonModalPurpose === "resume") void resumeFocus(); setInterruptionReasonOpen(false); }}>{reasonModalPurpose === "resume" ? "Resume without reason" : "Keep interruption running"}</Button>
           <Button tone="orange" disabled={!interruptionReasonDraft.trim()} onClick={() => { setReason(interruptionReasonDraft.trim()); if (reasonModalPurpose === "resume") void resumeFocus(); setInterruptionReasonOpen(false); }}>{reasonModalPurpose === "resume" && <Play size={16} fill="currentColor" />} {reasonModalPurpose === "resume" ? "Save reason & resume" : "Save reason"}</Button>
-        </div>
-      </Modal>
-      <Modal open={finishOpen} title={remainingSeconds === 0 ? "Complete focus session" : "Finish this session early?"} onClose={() => { if (!completing && !extending) void continueFocusing(); }}>
-        <p className="modal-description">Before finishing, capture what you did in one or two sentences. This summary is saved with the session and appears in your work history.</p>
-        <label className="completion-note-field" htmlFor="completion-note">
-          <span>Session summary {preferences["focus.requireCompletionNote"] && <em>Required</em>}</span>
-          <textarea
-            id="completion-note"
-            value={completionNote}
-            onChange={(event) => { setCompletionNote(event.target.value); if (completionError) setCompletionError(""); }}
-            onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); void submitCompletion(); } }}
-            placeholder="Finished JWT refresh handling and reviewed the API changes."
-            rows={3}
-            maxLength={280}
-            aria-invalid={Boolean(completionError)}
-            aria-describedby={completionError ? "completion-note-error completion-note-help" : "completion-note-help"}
-            disabled={completing}
-            autoFocus
-          />
-          <span className="completion-note-field__meta" id="completion-note-help"><small>Keep it brief · Ctrl+Enter to finish</small><small>{completionNote.length}/280</small></span>
-          {completionError && <small className="completion-note-field__error" id="completion-note-error" role="alert">{completionError}</small>}
-        </label>
-        {recentSummaries.length > 0 && (
-          <div className="completion-note-recent">
-            <span>Use a recent summary</span>
-            <div>{recentSummaries.map((summary) => <button className={completionNote === summary ? "is-selected" : ""} type="button" key={summary} onClick={() => { setCompletionNote(summary); setCompletionError(""); }} title={summary}>{summary}</button>)}</div>
-          </div>
-        )}
-        {remainingSeconds === 0 && (
-          <div className="completion-extension">
-            <span>Keep focusing for</span>
-            <div>{preferences["focus.quickDurations"].map((minutes) => <Pill key={minutes} selected={extensionMinutes === minutes} onClick={() => setExtensionMinutes(minutes)}>{minutes}m</Pill>)}</div>
-          </div>
-        )}
-        <div className="modal-actions">
-          <Button disabled={completing || extending} onClick={() => void continueFocusing()}>{extending ? "Extending…" : remainingSeconds === 0 ? `Keep focusing · +${extensionMinutes}m` : "Keep focusing"}</Button>
-          <Button tone="primary" disabled={completing || extending || (preferences["focus.requireCompletionNote"] && !completionNote.trim())} onClick={() => void submitCompletion()}><Check size={17} /> {completing ? "Saving…" : "Finish session"}</Button>
         </div>
       </Modal>
       <Modal open={cancelOpen} title="Cancel active work?" onClose={() => setCancelOpen(false)}>

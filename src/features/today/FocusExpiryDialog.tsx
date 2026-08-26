@@ -12,15 +12,18 @@ export function FocusExpiryDialog() {
   const selectedDuration = useTodayStore((state) => state.selectedDuration);
   const task = useTodayStore((state) => state.currentTask);
   const sessionId = useTodayStore((state) => state.sessionId);
+  const completionHeld = useTodayStore((state) => state.completionHeld);
   const completeSession = useTodayStore((state) => state.completeSession);
   const extendSession = useTodayStore((state) => state.extendSession);
+  const resumeFocus = useTodayStore((state) => state.resumeFocus);
   const [summary, setSummary] = useState("");
   const [recentSummaries, setRecentSummaries] = useState<string[]>([]);
   const [extensionMinutes, setExtensionMinutes] = useState(selectedDuration);
   const [preferences, setPreferences] = useState<SettingsState>({ ...defaultSettings, "focus.quickDurations": [...defaultSettings["focus.quickDurations"]], "reminders.snoozeOptions": [...defaultSettings["reminders.snoozeOptions"]] });
   const [busy, setBusy] = useState<"complete" | "extend" | null>(null);
   const [error, setError] = useState("");
-  const open = mode === "focusing" && remainingSeconds === 0 && Boolean(sessionId);
+  const open = mode === "paused" && completionHeld && Boolean(sessionId);
+  const expired = remainingSeconds === 0;
 
   useEffect(() => {
     void settingsService.all().then(setPreferences);
@@ -59,11 +62,12 @@ export function FocusExpiryDialog() {
     }
   };
 
-  const extend = async () => {
+  const continueFocusing = async () => {
     setBusy("extend");
     setError("");
     try {
-      await extendSession(extensionMinutes);
+      if (expired) await extendSession(extensionMinutes);
+      else await resumeFocus();
     } catch (extensionError) {
       setError(extensionError instanceof Error ? extensionError.message : String(extensionError));
     } finally {
@@ -72,9 +76,9 @@ export function FocusExpiryDialog() {
   };
 
   return (
-    <Modal open={open} title="Focus timer complete" onClose={() => void extend()} className="focus-expiry-modal">
+    <Modal open={open} title={expired ? "Focus timer complete" : "Finish this session early?"} onClose={() => void continueFocusing()} className="focus-expiry-modal">
       <div className="focus-expiry-dialog">
-        <p className="modal-description">Capture what you accomplished, or add more time and keep going.</p>
+        <p className="modal-description">Focus tracking is paused while this window is open. Capture what you accomplished, or keep going without counting the decision time.</p>
         <label className="completion-note-field" htmlFor="global-completion-note">
           <span>Session summary {preferences["focus.requireCompletionNote"] && <em>Required</em>}</span>
           <textarea
@@ -92,12 +96,12 @@ export function FocusExpiryDialog() {
           {error && <small className="completion-note-field__error" role="alert">{error}</small>}
         </label>
         {recentSummaries.length > 0 && <div className="completion-note-recent"><span>Use a recent summary</span><div>{recentSummaries.map((item) => <button className={summary === item ? "is-selected" : ""} type="button" key={item} onClick={() => setSummary(item)} title={item}>{item}</button>)}</div></div>}
-        <div className="completion-extension">
+        {expired && <div className="completion-extension">
           <span>Keep focusing for</span>
           <div>{preferences["focus.quickDurations"].map((minutes) => <Pill key={minutes} selected={extensionMinutes === minutes} onClick={() => setExtensionMinutes(minutes)}>{minutes}m</Pill>)}</div>
-        </div>
+        </div>}
         <div className="modal-actions">
-          <Button disabled={Boolean(busy)} onClick={() => void extend()}><TimerReset size={15} /> {busy === "extend" ? "Extending…" : `Keep focusing · +${extensionMinutes}m`}</Button>
+          <Button disabled={Boolean(busy)} onClick={() => void continueFocusing()}><TimerReset size={15} /> {busy === "extend" ? (expired ? "Extending…" : "Resuming…") : expired ? `Keep focusing · +${extensionMinutes}m` : "Keep focusing"}</Button>
           <Button tone="primary" disabled={Boolean(busy) || (preferences["focus.requireCompletionNote"] && !summary.trim())} onClick={() => void finish()}><Check size={16} /> {busy === "complete" ? "Saving…" : "Finish session"}</Button>
         </div>
       </div>

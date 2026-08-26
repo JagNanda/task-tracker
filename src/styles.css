@@ -678,9 +678,16 @@ kbd {
 
 /* Today content */
 .today-page {
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
   margin-left: var(--sidebar-width);
   padding: 20px 78px 96px 22px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-color: var(--border-bright) transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
 
 .today-header {
@@ -1287,8 +1294,14 @@ kbd {
 .filter-dot--breaks { background: var(--green); }
 
 .timeline-list {
+  max-height: 260px;
   position: relative;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
   padding: 1px 19px 0;
+  scrollbar-color: var(--border-bright) transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
 
 .timeline-list::before {
@@ -2755,9 +2768,16 @@ kbd {
 
 /* Timeline page */
 .timeline-page {
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
   margin-left: var(--sidebar-width);
   padding: 27px 34px 34px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-color: var(--border-bright) transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
   background:
     radial-gradient(circle at 47% 0%, rgba(18, 84, 145, 0.08), transparent 29%),
     linear-gradient(180deg, rgba(4, 14, 25, 0.22), transparent 36%);
@@ -4590,9 +4610,16 @@ kbd {
 /* Insights */
 .insights-page {
   min-width: 0;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
   margin-left: var(--sidebar-width);
   padding: 26px 30px 46px 28px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-color: var(--border-bright) transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
 
 .insights-header {

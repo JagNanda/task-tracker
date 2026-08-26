@@ -210,6 +210,8 @@ pub fn run() {
             database::focus_resume_interruption,
             database::focus_pause,
             database::focus_resume_pause,
+            database::focus_hold_for_completion,
+            database::focus_resume_completion_hold,
             database::focus_complete,
             database::focus_cancel,
         ])
