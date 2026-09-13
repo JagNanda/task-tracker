@@ -174,10 +174,10 @@ function FocusSettings({ values, update }: SectionProps) {
       <div className="settings-two-column">
         <div className="setting-group">
           <SettingRow title="Default focus duration" description="Used when a new focus session starts."><NativeSelect label="Default focus duration" value={values["focus.defaultDuration"]} options={[15, 25, 50, 75, 90].map((value) => ({ value, label: `${value} minutes` }))} onChange={(value) => void update("focus.defaultDuration", Number(value))} /></SettingRow>
-          <SettingRow title="Break after each session" description="Starts automatically when a focus session is completed."><NativeSelect label="Automatic break duration" value={values["focus.breakDuration"]} options={[1, 5, 10, 15, 20, 30, 45, 60].map((value) => ({ value, label: `${value} minute${value === 1 ? "" : "s"}` }))} onChange={(value) => void update("focus.breakDuration", Number(value))} /></SettingRow>
+          <SettingRow title="Break after each focus timer" description="Starts automatically when the focus timer ends. Choose to continue or finish after the break."><NativeSelect label="Automatic break duration" value={values["focus.breakDuration"]} options={[1, 5, 10, 15, 20, 30, 45, 60].map((value) => ({ value, label: `${value} minute${value === 1 ? "" : "s"}` }))} onChange={(value) => void update("focus.breakDuration", Number(value))} /></SettingRow>
           <SettingRow title="Session summary" description="Every focus session requires a short summary before it can be completed."><span className="setting-required-label"><LockKeyhole size={13} /> Required</span></SettingRow>
-          <ToggleRow title="Play sound when session ends" description="Play a sound when a focus session completes." checked={values["notifications.focusSound"]} onChange={(value) => void update("notifications.focusSound", value)} />
-          <ToggleRow title="Show Windows notification when session ends" description="Display a native notification when focus completes." checked={values["notifications.focusComplete"]} onChange={(value) => void update("notifications.focusComplete", value)} />
+          <ToggleRow title="Play sound when focus timer ends" description="Play a sound when your recovery break starts." checked={values["notifications.focusSound"]} onChange={(value) => void update("notifications.focusSound", value)} />
+          <ToggleRow title="Show Windows timer notifications" description="Display a native notification when focus and break timers end." checked={values["notifications.focusComplete"]} onChange={(value) => void update("notifications.focusComplete", value)} />
         </div>
         <div className="setting-group">
           <h3>Quick duration presets</h3>
@@ -395,7 +395,7 @@ function DesktopSettings({ values, update, notify }: SectionProps) {
 }
 
 function ShortcutSettings({ values, update }: SectionProps) {
-  const shortcuts = [["Ctrl + K", "Quick Capture"], ["Space", "Pause / Resume"], ["I", "Interrupt"], ["T", "Switch Task"], ["F", "Finish Focus"], ["N", "New Task"], ["Esc", "Close popup"]];
+  const shortcuts = [["Ctrl + K", "Quick Capture"], ["Space", "Pause / Resume"], ["I", "Interrupt"], ["T", "Switch Task"], ["F", "Start Break"], ["N", "New Task"], ["Esc", "Close popup"]];
   return (
     <SettingsSection title="Shortcuts" description="Current keyboard mappings. Shortcuts never fire while you are typing in an editor.">
       <ToggleRow title="Enable keyboard shortcuts" checked={values["shortcuts.enabled"]} onChange={(value) => void update("shortcuts.enabled", value)} />

@@ -9,6 +9,7 @@ export const focusService = {
   pauseFocus: focusSessionRepository.pause,
   resumeFocus: focusSessionRepository.resumePause,
   holdForCompletion: focusSessionRepository.holdForCompletion,
+  startBreak: focusSessionRepository.startBreak,
   resumeCompletionHold: focusSessionRepository.resumeCompletionHold,
   completeFocus: focusSessionRepository.complete,
   cancelActiveFocus: focusSessionRepository.cancel,

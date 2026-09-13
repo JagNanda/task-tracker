@@ -278,29 +278,31 @@ export function Modal({
   children,
   onClose,
   className,
+  dismissible = true,
 }: {
   open: boolean;
   title: string;
   children: ReactNode;
   onClose: () => void;
   className?: string;
+  dismissible?: boolean;
 }) {
   useEffect(() => {
-    if (!open) return;
+    if (!open || !dismissible) return;
     const onKeyDown = (event: KeyboardEvent) => event.key === "Escape" && onClose();
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
+  }, [open, onClose, dismissible]);
 
   if (!open) return null;
   return createPortal(
-    <div className="cdk-modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="cdk-modal-backdrop" role="presentation" onMouseDown={(event) => dismissible && event.target === event.currentTarget && onClose()}>
       <div className={cx("cdk-modal", className)} role="dialog" aria-modal="true" aria-labelledby="modal-title">
         <header>
           <h2 id="modal-title">{title}</h2>
-          <IconButton label="Close dialog" onClick={onClose}>
+          {dismissible && <IconButton label="Close dialog" onClick={onClose}>
             <X size={18} />
-          </IconButton>
+          </IconButton>}
         </header>
         {children}
       </div>

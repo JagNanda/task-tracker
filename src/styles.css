@@ -985,9 +985,12 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 5px;
+  max-height: 40vh;
+  overflow-y: auto;
 }
 
 .task-picker-list button {
+  flex-shrink: 0;
   min-height: 56px;
   display: grid;
   grid-template-columns: 8px 1fr 20px;

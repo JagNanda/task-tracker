@@ -20,6 +20,10 @@ export function TodayPage({ onNavigate }: { onNavigate?: (label: string) => void
   const tasks = useTaskStore((state) => state.tasks);
 
   useEffect(() => {
+    void refreshDashboard().catch((error) => console.error("Failed to refresh Today", error));
+  }, [refreshDashboard]);
+
+  useEffect(() => {
     void settingsService.get<boolean>("shortcuts.enabled").then((enabled) => setShortcutsEnabled(enabled ?? true));
   }, []);
 

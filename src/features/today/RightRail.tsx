@@ -83,7 +83,7 @@ export function RecentTasksCard({ onViewAll }: { onViewAll?: () => void }) {
   return (
     <Card className="rail-card recent-card">
       <CardHeader title="Recent Tasks" onAction={onViewAll} />
-      <div>{tasks.slice(0, 5).map((task) => <RecentTaskRow key={task.id} task={task} />)}</div>
+      <div>{tasks.length ? tasks.slice(0, 5).map((task) => <RecentTaskRow key={task.id} task={task} />) : <p className="rail-card__empty">No open tasks.</p>}</div>
     </Card>
   );
 }

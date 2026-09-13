@@ -6,6 +6,8 @@ export type FocusSnapshot = {
   status: "active" | "paused" | "interrupted" | "completed" | "cancelled";
   currentTaskId: string | null;
   targetDurationSeconds: number;
+  intervalDurationSeconds: number;
+  focusedMillisecondsBeforeInterval: number;
   startedAt: number;
   endedAt: number | null;
   focusedMilliseconds: number;
@@ -17,6 +19,7 @@ export type FocusSnapshot = {
     taskId: string | null;
     presetId: string | null;
     note: string | null;
+    targetDurationSeconds: number | null;
   };
 };
 
@@ -31,7 +34,8 @@ export const focusSessionRepository = {
   pause: (sessionId: string, note: string | null = null) => invoke<FocusSnapshot>("focus_pause", { sessionId, note, now: now() }),
   resumePause: (sessionId: string) => invoke<FocusSnapshot>("focus_resume_pause", { sessionId, now: now() }),
   holdForCompletion: (sessionId: string, heldAt = now()) => invoke<FocusSnapshot>("focus_hold_for_completion", { sessionId, now: heldAt }),
-  resumeCompletionHold: (sessionId: string) => invoke<FocusSnapshot>("focus_resume_completion_hold", { sessionId, now: now() }),
+  startBreak: (sessionId: string, targetDurationSeconds: number, startedAt = now()) => invoke<FocusSnapshot>("focus_start_break", { sessionId, targetDurationSeconds, now: startedAt }),
+  resumeCompletionHold: (sessionId: string, durationSeconds: number) => invoke<FocusSnapshot>("focus_resume_completion_hold", { sessionId, durationSeconds, now: now() }),
   complete: (sessionId: string, notes: Array<{ taskId: string | null; body: string }>) => invoke<FocusSnapshot>("focus_complete", { sessionId, notes, now: now() }),
   cancel: (sessionId: string) => invoke<FocusSnapshot>("focus_cancel", { sessionId, now: now() }),
   changeDuration: (sessionId: string, targetDurationSeconds: number) => execute(

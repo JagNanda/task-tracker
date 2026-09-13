@@ -182,6 +182,8 @@ pub struct FocusMutationResult {
     status: String,
     current_task_id: Option<String>,
     target_duration_seconds: i64,
+    interval_duration_seconds: i64,
+    focused_milliseconds_before_interval: i64,
     started_at: i64,
     ended_at: Option<i64>,
     focused_milliseconds: i64,
@@ -1222,7 +1224,7 @@ fn focus_result(
                 Ok((
                     row.get(0)?,
                     row.get(1)?,
-                    row.get(2)?,
+                    row.get::<_, i64>(2)?,
                     row.get(3)?,
                     row.get(4)?,
                 ))
@@ -1239,16 +1241,35 @@ fn focus_result(
             |row| row.get(0),
         )
         .map_err(|error| error.to_string())?;
+    // Only a recovery break followed by more work begins a new interval.
+    // Ordinary pauses and the pending post-break decision keep the current one.
+    let focused_milliseconds_before_interval: i64 = connection
+        .query_row(
+            "SELECT COALESCE(SUM(MAX(0, ended_at - started_at)), 0)
+             FROM work_segments WHERE focus_session_id = ?1 AND ended_at <= (
+                 SELECT MAX(b.ended_at) FROM breaks b
+                 WHERE b.focus_session_id = ?1 AND b.target_duration_seconds IS NOT NULL
+                   AND b.ended_at IS NOT NULL AND EXISTS (
+                       SELECT 1 FROM work_segments w
+                       WHERE w.focus_session_id = ?1 AND w.started_at >= b.ended_at
+                   )
+             )",
+            [session_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    let interval_duration_seconds =
+        (target_duration_seconds - (focused_milliseconds_before_interval + 999) / 1000).max(1);
     let open_activity = connection
         .query_row(
-            "SELECT type, id, started_at, task_id, preset_id, note FROM (\n\
-                 SELECT 'focus' AS type, id, started_at, task_id, NULL AS preset_id, NULL AS note\n\
+            "SELECT type, id, started_at, task_id, preset_id, note, target_duration_seconds FROM (\n\
+                 SELECT 'focus' AS type, id, started_at, task_id, NULL AS preset_id, NULL AS note, NULL AS target_duration_seconds\n\
                    FROM work_segments WHERE focus_session_id = ?1 AND ended_at IS NULL\n\
                  UNION ALL\n\
-                 SELECT 'interruption', id, started_at, NULL, preset_id, note\n\
+                 SELECT 'interruption', id, started_at, NULL, preset_id, note, NULL\n\
                    FROM interruptions WHERE focus_session_id = ?1 AND ended_at IS NULL\n\
                  UNION ALL\n\
-                 SELECT 'break', id, started_at, NULL, NULL, note\n\
+                 SELECT 'break', id, started_at, NULL, NULL, note, target_duration_seconds\n\
                    FROM breaks WHERE focus_session_id = ?1 AND ended_at IS NULL\n\
              ) LIMIT 1",
             [session_id],
@@ -1260,6 +1281,7 @@ fn focus_result(
                     "taskId": row.get::<_, Option<String>>(3)?,
                     "presetId": row.get::<_, Option<String>>(4)?,
                     "note": row.get::<_, Option<String>>(5)?,
+                    "targetDurationSeconds": row.get::<_, Option<i64>>(6)?,
                 }))
             },
         )
@@ -1270,6 +1292,8 @@ fn focus_result(
         status,
         current_task_id,
         target_duration_seconds,
+        interval_duration_seconds,
+        focused_milliseconds_before_interval,
         started_at,
         ended_at,
         focused_milliseconds,
@@ -1594,11 +1618,73 @@ pub fn focus_hold_for_completion(
     hold_focus_for_completion_locked(connection, &session_id, now)
 }
 
+fn start_focus_break_locked(
+    connection: &mut Connection,
+    session_id: &str,
+    target_duration_seconds: i64,
+    now: i64,
+) -> Result<FocusMutationResult, String> {
+    if target_duration_seconds <= 0 {
+        return Err("break duration must be positive".to_string());
+    }
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let status = session_status(&transaction, session_id)?;
+    if !matches!(status.as_str(), "active" | "paused" | "interrupted") {
+        return Err("focus session has already ended".to_string());
+    }
+    let already_started: bool = transaction
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM breaks WHERE focus_session_id = ?1 AND ended_at IS NULL AND target_duration_seconds IS NOT NULL)",
+            [session_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if !already_started {
+        close_all_open_activity(&transaction, session_id, now)?;
+        ensure_no_open_activity(&transaction, session_id)?;
+        transaction
+            .execute(
+                "INSERT INTO breaks (id, focus_session_id, started_at, note, source, created_at, target_duration_seconds)
+                 VALUES (?1, ?2, ?3, 'Automatic recovery break', 'timer', ?3, ?4)",
+                params![new_id("break"), session_id, now, target_duration_seconds],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "UPDATE focus_sessions SET status = 'paused', updated_at = MAX(updated_at, ?2) WHERE id = ?1",
+                params![session_id, now],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    transaction.commit().map_err(|error| error.to_string())?;
+    focus_result(connection, session_id, now)
+}
+
+#[tauri::command]
+pub fn focus_start_break(
+    state: State<'_, DatabaseState>,
+    session_id: String,
+    target_duration_seconds: i64,
+    now: i64,
+) -> Result<FocusMutationResult, String> {
+    let mut guard = state_connection(&state)?;
+    let connection = guard
+        .as_mut()
+        .ok_or("database is temporarily unavailable")?;
+    start_focus_break_locked(connection, &session_id, target_duration_seconds, now)
+}
+
 fn resume_completion_hold_locked(
     connection: &mut Connection,
     session_id: &str,
     now: i64,
+    duration_seconds: i64,
 ) -> Result<FocusMutationResult, String> {
+    if duration_seconds <= 0 {
+        return Err("focus duration must be positive".to_string());
+    }
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
@@ -1606,6 +1692,14 @@ fn resume_completion_hold_locked(
         return Err("focus session is not held for completion".to_string());
     }
     ensure_no_open_activity(&transaction, session_id)?;
+    let focused_milliseconds: i64 = transaction
+        .query_row(
+            "SELECT COALESCE(SUM(MAX(0, ended_at - started_at)), 0) FROM work_segments WHERE focus_session_id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    let target_duration_seconds = (focused_milliseconds + 999) / 1000 + duration_seconds;
     let task_id: Option<String> = transaction
         .query_row(
             "SELECT current_task_id FROM focus_sessions WHERE id = ?1",
@@ -1615,8 +1709,8 @@ fn resume_completion_hold_locked(
         .map_err(|error| error.to_string())?;
     transaction
         .execute(
-            "UPDATE focus_sessions SET status = 'active', updated_at = ?2 WHERE id = ?1",
-            params![session_id, now],
+            "UPDATE focus_sessions SET status = 'active', updated_at = ?2, target_duration_seconds = ?3 WHERE id = ?1",
+            params![session_id, now, target_duration_seconds],
         )
         .map_err(|error| error.to_string())?;
     transaction
@@ -1635,12 +1729,13 @@ pub fn focus_resume_completion_hold(
     state: State<'_, DatabaseState>,
     session_id: String,
     now: i64,
+    duration_seconds: i64,
 ) -> Result<FocusMutationResult, String> {
     let mut guard = state_connection(&state)?;
     let connection = guard
         .as_mut()
         .ok_or("database is temporarily unavailable")?;
-    resume_completion_hold_locked(connection, &session_id, now)
+    resume_completion_hold_locked(connection, &session_id, now, duration_seconds)
 }
 
 #[tauri::command]
@@ -1680,12 +1775,28 @@ fn finish_focus(
     let connection = guard
         .as_mut()
         .ok_or("database is temporarily unavailable")?;
+    finish_focus_locked(connection, session_id, notes, now, final_status)
+}
+
+fn finish_focus_locked(
+    connection: &mut Connection,
+    session_id: &str,
+    notes: Vec<CompletionNoteInput>,
+    now: i64,
+    final_status: &str,
+) -> Result<FocusMutationResult, String> {
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
     let status = session_status(&transaction, session_id)?;
     if !matches!(status.as_str(), "active" | "paused" | "interrupted") {
         return Err("focus session has already ended".to_string());
+    }
+    if final_status == "completed" {
+        if status != "paused" {
+            return Err("finish the recovery break before completing this session".to_string());
+        }
+        ensure_no_open_activity(&transaction, session_id)?;
     }
     close_all_open_activity(&transaction, session_id, now)?;
     ensure_no_open_activity(&transaction, session_id)?;
@@ -2033,12 +2144,153 @@ mod tests {
         let still_held = focus_result(&connection, "session", 20_000).unwrap();
         assert_eq!(still_held.focused_milliseconds, 10_000);
 
-        let resumed = resume_completion_hold_locked(&mut connection, "session", 20_000).unwrap();
+        let resumed =
+            resume_completion_hold_locked(&mut connection, "session", 20_000, 1500).unwrap();
         assert_eq!(resumed.status, "active");
         assert_eq!(resumed.focused_milliseconds, 10_000);
         let open_activity = resumed.open_activity.unwrap();
         assert_eq!(open_activity["type"].as_str(), Some("focus"));
         assert_eq!(open_activity["startedAt"].as_i64(), Some(20_000));
+    }
+
+    #[test]
+    fn automatic_break_keeps_session_open_until_explicit_completion() {
+        let mut connection = migrated_connection();
+        connection.execute("INSERT INTO focus_sessions (id, target_duration_seconds, status, started_at, created_at, updated_at) VALUES ('session', 10, 'active', 1000, 1000, 1000)", []).unwrap();
+        connection.execute("INSERT INTO work_segments (id, focus_session_id, started_at, source, created_at) VALUES ('work', 'session', 1000, 'timer', 1000)", []).unwrap();
+
+        let recovery = start_focus_break_locked(&mut connection, "session", 5, 11_000).unwrap();
+        assert_eq!(recovery.status, "paused");
+        assert_eq!(recovery.ended_at, None);
+        assert_eq!(recovery.focused_milliseconds, 10_000);
+        let activity = recovery.open_activity.unwrap();
+        assert_eq!(activity["type"], "break");
+        assert_eq!(activity["targetDurationSeconds"], 5);
+        assert!(
+            finish_focus_locked(&mut connection, "session", vec![], 12_000, "completed").is_err()
+        );
+        assert!(resume_completion_hold_locked(&mut connection, "session", 12_000, 10).is_err());
+
+        // A duplicate timer event must leave the original break intact.
+        let repeated = start_focus_break_locked(&mut connection, "session", 5, 13_000).unwrap();
+        assert_eq!(repeated.open_activity.unwrap()["id"], activity["id"]);
+        assert_eq!(repeated.focused_milliseconds, 10_000);
+        connection
+            .execute(
+                "UPDATE breaks SET ended_at = 16000 WHERE focus_session_id = 'session'",
+                [],
+            )
+            .unwrap();
+        let waiting = focus_result(&connection, "session", 20_000).unwrap();
+        assert!(waiting.open_activity.is_none());
+        assert_eq!(waiting.ended_at, None);
+        assert_eq!(waiting.focused_milliseconds, 10_000);
+
+        let completed = finish_focus_locked(
+            &mut connection,
+            "session",
+            vec![CompletionNoteInput {
+                task_id: None,
+                body: "Completed after recovery".to_string(),
+            }],
+            25_000,
+            "completed",
+        )
+        .unwrap();
+        assert_eq!(completed.status, "completed");
+        assert_eq!(completed.ended_at, Some(25_000));
+        assert_eq!(completed.focused_milliseconds, 10_000);
+        let note: String = connection
+            .query_row(
+                "SELECT body FROM focus_session_notes WHERE focus_session_id = 'session'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(note, "Completed after recovery");
+    }
+
+    #[test]
+    fn continuing_after_recovery_reuses_the_session_without_counting_decision_time() {
+        let mut connection = migrated_connection();
+        connection.execute("INSERT INTO focus_sessions (id, target_duration_seconds, status, started_at, created_at, updated_at) VALUES ('session', 10, 'active', 1000, 1000, 1000)", []).unwrap();
+        connection.execute("INSERT INTO work_segments (id, focus_session_id, started_at, source, created_at) VALUES ('work', 'session', 1000, 'timer', 1000)", []).unwrap();
+        start_focus_break_locked(&mut connection, "session", 5, 11_000).unwrap();
+        connection
+            .execute(
+                "UPDATE breaks SET ended_at = 16000 WHERE focus_session_id = 'session'",
+                [],
+            )
+            .unwrap();
+        let resumed =
+            resume_completion_hold_locked(&mut connection, "session", 25_000, 10).unwrap();
+        assert_eq!(resumed.session_id, "session");
+        assert_eq!(resumed.status, "active");
+        assert_eq!(resumed.focused_milliseconds, 10_000);
+        assert_eq!(resumed.target_duration_seconds, 20);
+        assert_eq!(resumed.interval_duration_seconds, 10);
+        assert_eq!(resumed.focused_milliseconds_before_interval, 10_000);
+        assert_eq!(resumed.open_activity.unwrap()["startedAt"], 25_000);
+        let second_break = start_focus_break_locked(&mut connection, "session", 5, 35_000).unwrap();
+        assert_eq!(second_break.focused_milliseconds, 20_000);
+        assert_eq!(second_break.interval_duration_seconds, 10);
+        assert_eq!(second_break.ended_at, None);
+        let sessions: i64 = connection
+            .query_row("SELECT COUNT(*) FROM focus_sessions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(sessions, 1);
+    }
+
+    #[test]
+    fn continued_interval_restores_from_history_without_counting_ordinary_pauses() {
+        let connection = migrated_connection();
+        connection.execute("INSERT INTO focus_sessions (id, target_duration_seconds, status, started_at, created_at, updated_at) VALUES ('session', 3000, 'active', 1000, 1000, 1000)", []).unwrap();
+        connection.execute("INSERT INTO work_segments (id, focus_session_id, started_at, ended_at, source, created_at) VALUES ('first', 'session', 1000, 1501000, 'timer', 1000), ('second', 'session', 1801000, 1861000, 'timer', 1801000)", []).unwrap();
+        connection.execute("INSERT INTO breaks (id, focus_session_id, started_at, ended_at, target_duration_seconds, source, created_at) VALUES ('recovery', 'session', 1501000, 1801000, 300, 'timer', 1501000), ('pause', 'session', 1861000, 1921000, NULL, 'timer', 1861000)", []).unwrap();
+        connection.execute("INSERT INTO work_segments (id, focus_session_id, started_at, source, created_at) VALUES ('third', 'session', 1921000, 'timer', 1921000)", []).unwrap();
+
+        let restored = focus_result(&connection, "session", 1981000).unwrap();
+        assert_eq!(restored.target_duration_seconds, 3000);
+        assert_eq!(restored.interval_duration_seconds, 1500);
+        assert_eq!(restored.focused_milliseconds_before_interval, 1500000);
+        assert_eq!(restored.focused_milliseconds, 1620000);
+    }
+
+    #[test]
+    fn continue_preserves_exact_duration_after_fractional_focus_time() {
+        let mut connection = migrated_connection();
+        connection.execute("INSERT INTO focus_sessions (id, target_duration_seconds, status, started_at, created_at, updated_at) VALUES ('session', 1500, 'active', 1000, 1000, 1000)", []).unwrap();
+        connection.execute("INSERT INTO work_segments (id, focus_session_id, started_at, source, created_at) VALUES ('first', 'session', 1000, 'timer', 1000)", []).unwrap();
+        start_focus_break_locked(&mut connection, "session", 300, 124456).unwrap();
+        connection
+            .execute(
+                "UPDATE breaks SET ended_at = 424456 WHERE focus_session_id = 'session'",
+                [],
+            )
+            .unwrap();
+        assert!(resume_completion_hold_locked(&mut connection, "session", 425000, 0).is_err());
+        let waiting = focus_result(&connection, "session", 425000).unwrap();
+        assert_eq!(waiting.target_duration_seconds, 1500);
+        assert_eq!(waiting.status, "paused");
+        assert!(waiting.open_activity.is_none());
+
+        let resumed =
+            resume_completion_hold_locked(&mut connection, "session", 425000, 1500).unwrap();
+        assert_eq!(resumed.target_duration_seconds, 1624);
+        assert_eq!(resumed.interval_duration_seconds, 1500);
+        assert_eq!(resumed.focused_milliseconds_before_interval, 123456);
+        assert_eq!(resumed.focused_milliseconds, 123456);
+    }
+
+    #[test]
+    fn invalid_break_duration_does_not_stop_focus() {
+        let mut connection = migrated_connection();
+        connection.execute("INSERT INTO focus_sessions (id, target_duration_seconds, status, started_at, created_at, updated_at) VALUES ('session', 10, 'active', 1000, 1000, 1000)", []).unwrap();
+        connection.execute("INSERT INTO work_segments (id, focus_session_id, started_at, source, created_at) VALUES ('work', 'session', 1000, 'timer', 1000)", []).unwrap();
+        assert!(start_focus_break_locked(&mut connection, "session", 0, 11_000).is_err());
+        let active = focus_result(&connection, "session", 12_000).unwrap();
+        assert_eq!(active.status, "active");
+        assert_eq!(active.open_activity.unwrap()["type"], "focus");
     }
 
     #[test]

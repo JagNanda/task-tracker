@@ -39,4 +39,5 @@ export const mockTodayState: TodayState = {
     { id: "7", time: "1:30 PM", type: "Focus", title: "Fix token refresh bug", tag: "Backend", duration: "35m" },
   ],
   quickCaptureDraft: "",
+  availableTasks: [],
 };

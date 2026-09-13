@@ -46,5 +46,6 @@ export interface TodayState {
   timeline: TimelineEntry[];
   reminders: Reminder[];
   recentTasks: Task[];
+  availableTasks: Task[];
   quickCaptureDraft: string;
 }

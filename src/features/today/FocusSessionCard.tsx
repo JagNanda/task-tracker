@@ -21,6 +21,7 @@ import { formatClock } from "./utils";
 import { interruptionService } from "../../data/services/interruptionService";
 import { settingsService } from "../../data/services/settingsService";
 import { defaultSettings, type SettingsState } from "../settings/settingsDefaults";
+import { useTaskStore } from "../tasks/taskStore";
 
 export function CurrentTaskHeader({ task, onEdit, mode }: { task: Task; onEdit: () => void; mode: string }) {
   const eyebrow = mode === "interrupted" ? "INTERRUPTED" : mode === "paused" ? "SESSION PAUSED" : mode === "ready" ? "READY TO FOCUS" : "FOCUSING ON";
@@ -142,27 +143,41 @@ export function FocusControls({
       )}
       {mode !== "interrupted" && <Button tone="orange" size="lg" onClick={onInterrupt} disabled={mode === "ready"}><Zap size={19} fill="currentColor" /> Interrupt</Button>}
       <Button size="lg" onClick={onSwitch}><Repeat2 size={19} /> Switch Task</Button>
-      <Button size="lg" onClick={onFinish} disabled={mode === "ready"}><Check size={20} /> Finish Early</Button>
+      <Button size="lg" onClick={onFinish} disabled={mode === "ready"}><Coffee size={20} /> Start Break</Button>
       <Button size="lg" onClick={onCancel}><X size={20} /> Cancel Active Work</Button>
     </div>
   );
 }
 
 function TaskPicker({ open, onClose, preserveSession = false }: { open: boolean; onClose: () => void; preserveSession?: boolean }) {
-  const tasks = useTodayStore((state) => state.recentTasks);
+  const tasks = useTodayStore((state) => state.availableTasks);
   const selectTask = useTodayStore((state) => state.selectTask);
   const switchTask = useTodayStore((state) => state.switchTask);
   const captureTask = useTodayStore((state) => state.captureTask);
+  const refreshDashboard = useTodayStore((state) => state.refreshDashboard);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [loadingTasks, setLoadingTasks] = useState(true);
+  const [taskLoadError, setTaskLoadError] = useState("");
 
   useEffect(() => {
-    if (open) {
-      setNewTaskTitle("");
-      setCreateError("");
-    }
-  }, [open]);
+    if (!open) return;
+    let current = true;
+    setNewTaskTitle("");
+    setCreateError("");
+    setLoadingTasks(true);
+    setTaskLoadError("");
+    void refreshDashboard()
+      .then(() => {
+        if (current) setTaskLoadError(useTaskStore.getState().error ? "Couldn’t refresh tasks. Close and reopen the picker to retry." : "");
+      })
+      .catch(() => {
+        if (current) setTaskLoadError("Couldn’t refresh tasks. Close and reopen the picker to retry.");
+      })
+      .finally(() => { if (current) setLoadingTasks(false); });
+    return () => { current = false; };
+  }, [open, refreshDashboard]);
 
   const createAndUseTask = async () => {
     const title = newTaskTitle.trim();
@@ -190,8 +205,8 @@ function TaskPicker({ open, onClose, preserveSession = false }: { open: boolean;
         {createError && <small className="task-picker-create__error" role="alert">{createError}</small>}
       </form>
       <div className="task-picker-divider"><span>or choose an existing task</span></div>
-      <div className="task-picker-list">
-        {tasks.map((task) => (
+      <div className="task-picker-list" aria-busy={loadingTasks}>
+        {loadingTasks ? <p className="modal-description" role="status">Loading tasks…</p> : taskLoadError ? <p className="task-picker-create__error" role="alert">{taskLoadError}</p> : tasks.length === 0 ? <p className="modal-description">No open tasks. Create a new task above to get started.</p> : tasks.map((task) => (
           <button key={task.id} type="button" onClick={() => { preserveSession ? void switchTask(task) : selectTask(task); onClose(); }}>
             <span className="task-color" style={{ background: task.color }} />
             <span><strong>{task.title}</strong><small>{task.category} • {task.tag}</small></span>
@@ -231,6 +246,8 @@ function BreakSessionCard({ onOpenSettings }: { onOpenSettings?: () => void }) {
   const totalSeconds = useTodayStore((state) => state.totalSeconds);
   const breakDurationMinutes = useTodayStore((state) => state.breakDurationMinutes);
   const endBreak = useTodayStore((state) => state.endBreak);
+  const timerTransitioning = useTodayStore((state) => state.timerTransitioning);
+  const [error, setError] = useState("");
   return (
     <Card className="focus-card focus-card--break">
       <div className="focus-card__main">
@@ -239,18 +256,19 @@ function BreakSessionCard({ onOpenSettings }: { onOpenSettings?: () => void }) {
             <div className="break-timer-header">
               <span><Coffee size={14} /> BREAK TIME</span>
               <strong>Rest and reset</strong>
-              <p>Your next focus session can start when you’re ready.</p>
+              <p>Choose to continue or finish when your break ends.</p>
             </div>
           </FocusTimer>
         </div>
         <div className="focus-controls break-controls">
-          <Button tone="primary" size="lg" onClick={() => void endBreak()}><Check size={19} /> End Break</Button>
+          <Button tone="primary" size="lg" disabled={timerTransitioning} onClick={() => { setError(""); void endBreak().catch((error) => setError(String(error))); }}><Check size={19} /> End Break</Button>
+          {error && <p role="alert">{error}</p>}
           {onOpenSettings && <Button size="lg" onClick={onOpenSettings}><Settings2 size={18} /> Break Settings</Button>}
           <div className="break-controls__tip"><Coffee size={16} /><p><strong>Step away for a moment</strong><span>Stretch, hydrate, or rest your eyes.</span></p></div>
         </div>
       </div>
       <div className="focus-card__footer">
-        <div className="break-footer"><Badge>Automatic break</Badge><span>{breakDurationMinutes} minute{breakDurationMinutes === 1 ? "" : "s"} after each completed session</span></div>
+        <div className="break-footer"><Badge>Automatic break</Badge><span>{breakDurationMinutes} minute{breakDurationMinutes === 1 ? "" : "s"} after each focus timer</span></div>
         <div className="session-meta"><span>Break tracking: On <i /></span></div>
       </div>
     </Card>
@@ -307,7 +325,7 @@ export function FocusSessionCard({ onOpenSettings }: { onOpenSettings?: () => vo
   };
   const finish = () => {
     void requestCompletion().catch((error) => {
-      console.error("Failed to pause focus tracking for completion", error);
+      console.error("Failed to start recovery break", error);
     });
   };
 
