@@ -49,6 +49,8 @@ function toFlowoTask(task: TaskRecord): FlowoTask {
     },
     reminderCount: task.reminder_count,
     noteCount: task.note_count,
+    checklistTotal: task.checklist_total ?? 0,
+    checklistDone: task.checklist_done ?? 0,
     createdOrder: task.created_at,
     workedOrder: task.last_worked_at ?? task.updated_at,
     completedToday: task.completed_at !== null && task.completed_at >= new Date().setHours(0, 0, 0, 0),
@@ -65,6 +67,7 @@ type TaskStore = {
   updateTask: (id: string, input: SaveTaskInput) => Promise<void>;
   setStatus: (id: string, status: TaskStatus) => Promise<void>;
   deletePermanently: (id: string) => Promise<void>;
+  setChecklistProgress: (id: string, done: number, total: number) => void;
 };
 
 export const useTaskStore = create<TaskStore>((set, get) => ({
@@ -95,5 +98,10 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   deletePermanently: async (id) => {
     await taskRepository.deletePermanently(id);
     set((state) => ({ tasks: state.tasks.filter((task) => task.id !== id) }));
+  },
+  setChecklistProgress: (id, done, total) => {
+    set((state) => ({
+      tasks: state.tasks.map((task) => task.id === id ? { ...task, checklistDone: done, checklistTotal: total } : task),
+    }));
   },
 }));

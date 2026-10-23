@@ -21,6 +21,8 @@ export type TaskRecord = {
   reminder_count: number;
   next_reminder_at: number | null;
   next_reminder_message: string | null;
+  checklist_total: number;
+  checklist_done: number;
 };
 
 export type SaveTaskInput = {
@@ -48,7 +50,9 @@ export const taskRepository = {
         (SELECT COUNT(*) FROM task_notes n WHERE n.task_id = t.id) AS note_count,
         (SELECT COUNT(*) FROM task_reminders r WHERE r.task_id = t.id AND r.status = 'active') AS reminder_count,
         (SELECT r.scheduled_for FROM task_reminders r WHERE r.task_id = t.id AND r.status = 'active' ORDER BY r.scheduled_for LIMIT 1) AS next_reminder_at,
-        (SELECT r.message FROM task_reminders r WHERE r.task_id = t.id AND r.status = 'active' ORDER BY r.scheduled_for LIMIT 1) AS next_reminder_message
+        (SELECT r.message FROM task_reminders r WHERE r.task_id = t.id AND r.status = 'active' ORDER BY r.scheduled_for LIMIT 1) AS next_reminder_message,
+        (SELECT COUNT(*) FROM task_checklist_items c WHERE c.task_id = t.id) AS checklist_total,
+        (SELECT COUNT(*) FROM task_checklist_items c WHERE c.task_id = t.id AND c.is_completed = 1) AS checklist_done
        FROM tasks t ORDER BY COALESCE(last_worked_at, t.updated_at) DESC`,
       [now, dayStart, dayEnd],
     );

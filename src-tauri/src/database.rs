@@ -47,6 +47,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "activity corrections",
         include_str!("../migrations/006_activity_corrections.sql"),
     ),
+    (
+        7,
+        "task checklists",
+        include_str!("../migrations/007_task_checklists.sql"),
+    ),
 ];
 const DEFAULT_SETTINGS_SQL: &str = include_str!("../sql/default_settings.sql");
 const RESET_THEME_SQL: &str = "
@@ -1844,6 +1849,7 @@ pub fn database_delete_all_data(
         "task_reminders",
         "note_screenshots",
         "task_notes",
+        "task_checklist_items",
         "tasks",
     ] {
         transaction
@@ -1956,6 +1962,7 @@ mod tests {
             "breaks",
             "saved_reports",
             "app_settings",
+            "task_checklist_items",
         ] {
             assert!(tables.contains(table), "missing table {table}");
         }
@@ -1981,6 +1988,26 @@ mod tests {
             .unwrap();
         assert_eq!(report_interruptions, "false");
         assert_eq!(report_breaks, "false");
+    }
+
+    #[test]
+    fn checklist_items_belong_to_their_task() {
+        let connection = migrated_connection();
+        connection.execute("INSERT INTO tasks (id, title, status, created_at, updated_at) VALUES ('task', 'Checklist task', 'todo', 1, 1)", []).unwrap();
+        connection.execute("INSERT INTO task_checklist_items (id, task_id, body, is_completed, sort_order, completed_at, created_at, updated_at) VALUES ('one', 'task', 'First step', 1, 0, 2, 1, 2)", []).unwrap();
+        connection.execute("INSERT INTO task_checklist_items (id, task_id, body, sort_order, created_at, updated_at) VALUES ('two', 'task', 'Second step', 1, 1, 1)", []).unwrap();
+        assert!(connection.execute("INSERT INTO task_checklist_items (id, task_id, body, created_at, updated_at) VALUES ('blank', 'task', '   ', 1, 1)", []).is_err());
+        assert!(connection.execute("INSERT INTO task_checklist_items (id, task_id, body, created_at, updated_at) VALUES ('orphan', 'missing', 'Orphan', 1, 1)", []).is_err());
+        assert!(connection.execute("INSERT INTO task_checklist_items (id, task_id, body, is_completed, created_at, updated_at) VALUES ('bad', 'task', 'Bad flag', 2, 1, 1)", []).is_err());
+        connection
+            .execute("DELETE FROM tasks WHERE id = 'task'", [])
+            .unwrap();
+        let remaining: i64 = connection
+            .query_row("SELECT COUNT(*) FROM task_checklist_items", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(remaining, 0);
     }
 
     #[test]

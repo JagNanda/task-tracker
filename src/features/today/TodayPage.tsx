@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AppSidebar, MobileNavigation } from "./AppSidebar";
+import { CurrentTaskChecklist } from "./CurrentTaskChecklist";
 import { CurrentTaskNotes } from "./CurrentTaskNotes";
 import { FocusSessionCard } from "./FocusSessionCard";
 import { QuickActionBar } from "./QuickActionBar";
@@ -64,6 +65,7 @@ export function TodayPage({ onNavigate }: { onNavigate?: (label: string) => void
         <div className="today-grid">
           <div className="today-primary">
             <FocusSessionCard onOpenSettings={() => { window.sessionStorage.setItem("flowo:settings-section", "focus"); onNavigate?.("Settings"); }} />
+            <CurrentTaskChecklist />
             <CurrentTaskNotes />
             <TodayTimeline />
           </div>

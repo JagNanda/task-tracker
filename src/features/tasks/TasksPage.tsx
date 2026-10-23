@@ -13,6 +13,7 @@ import {
   EllipsisVertical,
   FileText,
   Image as ImageIcon,
+  ListChecks,
   ListFilter,
   MessageSquareText,
   MoreHorizontal,
@@ -25,7 +26,7 @@ import {
   Zap,
   X,
 } from "lucide-react";
-import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Badge, Button, IconButton, Input, Modal, Popover } from "../../cdk";
 import { AppSidebar, MobileNavigation } from "../today/AppSidebar";
@@ -38,6 +39,9 @@ import {
 import { NotesViewerModal } from "./NotesViewerModal";
 import { type TaskNote, useTaskNotesStore } from "./notesStore";
 import { databaseStatus, useTaskStore } from "./taskStore";
+import { type ChecklistItem, moveChecklistItem, useChecklistStore } from "./checklistStore";
+import { ChecklistEditor, TaskChecklistCard } from "./TaskChecklist";
+import { createId } from "../../data/database";
 import { entryMinutes, formatClock, formatDuration, localDateKey, type TimelineActivity, useTimelineStore } from "../timeline/timelineStore";
 import { settingsService } from "../../data/services/settingsService";
 import { RemindersDialog } from "../reminders/RemindersDialog";
@@ -74,6 +78,8 @@ export type FlowoTask = {
   reminder?: TaskReminder;
   reminderCount: number;
   noteCount: number;
+  checklistTotal?: number;
+  checklistDone?: number;
   createdOrder: number;
   workedOrder: number;
   completedToday?: boolean;
@@ -383,7 +389,18 @@ function TaskRow({
       onKeyDown={moveFocus}
     >
       <span className="task-row__status" aria-label={statusLabels[task.status]}>{statusIcon(task.status)}</span>
-      <button className="task-row__title" type="button" onClick={onSelect}>{task.title}</button>
+      <span className="task-row__name">
+        <button className="task-row__title" type="button" onClick={onSelect}>{task.title}</button>
+        {Boolean(task.checklistTotal) && (
+          <span
+            className={`task-row__checklist ${task.checklistDone === task.checklistTotal ? "is-complete" : ""}`}
+            title={`${task.checklistDone ?? 0} of ${task.checklistTotal} checklist items done`}
+            aria-label={`Checklist ${task.checklistDone ?? 0} of ${task.checklistTotal} done`}
+          >
+            <ListChecks size={12} /> {task.checklistDone ?? 0}/{task.checklistTotal}
+          </span>
+        )}
+      </span>
       <Badge className="task-row__context">{task.context}</Badge>
       <span className="task-row__state">
         {focusMode ? <Badge className={`task-focus-badge task-focus-badge--${focusMode}`}>{focusMode === "interrupted" ? <Zap size={11} fill="currentColor" /> : <Pause size={11} fill="currentColor" />} {focusStateLabel}</Badge> : task.status === "blocked" ? <Badge className="task-blocked-badge">Blocked</Badge> : null}
@@ -556,6 +573,8 @@ export function TaskDetailsPopup({
         </div>
 
         <div className="task-details-grid">
+          <TaskChecklistCard key={task.id} taskId={task.id} />
+
           <section className="task-details-card">
             <header><h3>Reminders <small>{task.reminderCount}</small></h3><button type="button" onClick={() => onAction("Add Reminder")}>{task.reminderCount ? "Manage reminders" : "+ Add Reminder"}</button></header>
             <div className="task-detail-reminders">
@@ -629,6 +648,10 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
   const [draftContext, setDraftContext] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
   const [draftStatus, setDraftStatus] = useState<TaskStatus>("todo");
+  const [draftChecklist, setDraftChecklist] = useState<ChecklistItem[]>([]);
+  // Which task the form's checklist was loaded for, and whether the person has changed it since.
+  const draftChecklistSource = useRef<{ taskId: string | null; touched: boolean }>({ taskId: null, touched: false });
+  const replaceChecklist = useChecklistStore((state) => state.replaceTask);
   const [notice, setNotice] = useState("");
   const [taskPreferences, setTaskPreferences] = useState({
     defaultStatus: "todo" as "todo" | "in_progress",
@@ -695,12 +718,7 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
       setNoteComposer({ mode: "create", taskId: selectedTask.id });
       return;
     }
-    setEditingId(selectedTask.id);
-    setDraftTitle(selectedTask.title);
-    setDraftContext(selectedTask.context);
-    setDraftDescription(selectedTask.description);
-    setDraftStatus(selectedTask.status);
-    setCreateOpen(true);
+    openEdit(selectedTask);
   }, [requestedAction, selectedTask?.id]);
 
   useEffect(() => {
@@ -834,6 +852,8 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
     setDraftContext("");
     setDraftDescription("");
     setDraftStatus(taskPreferences.defaultStatus === "in_progress" ? "in-progress" : "todo");
+    setDraftChecklist([]);
+    draftChecklistSource.current = { taskId: null, touched: false };
     setCreateOpen(true);
   };
 
@@ -843,7 +863,36 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
     setDraftContext(task.context);
     setDraftDescription(task.description);
     setDraftStatus(task.status);
+    setDraftChecklist(useChecklistStore.getState().itemsByTask[task.id] ?? []);
+    draftChecklistSource.current = { taskId: task.id, touched: false };
+    void useChecklistStore.getState().loadTask(task.id).then((items) => {
+      const source = draftChecklistSource.current;
+      if (source.taskId === task.id && !source.touched) setDraftChecklist(items);
+    }).catch((error) => console.error("Failed to load checklist", error));
     setCreateOpen(true);
+  };
+
+  const updateDraftChecklist = (update: (items: ChecklistItem[]) => ChecklistItem[]) => {
+    draftChecklistSource.current.touched = true;
+    setDraftChecklist(update);
+  };
+
+  const draftChecklistHandlers = {
+    onAdd: (body: string) => updateDraftChecklist((items) => [...items, { id: createId("check"), body, completed: false }]),
+    onToggle: (itemId: string) => updateDraftChecklist((items) => items.map((item) => item.id === itemId ? { ...item, completed: !item.completed } : item)),
+    onRename: (itemId: string, body: string) => updateDraftChecklist((items) => items.map((item) => item.id === itemId ? { ...item, body } : item)),
+    onRemove: (itemId: string) => updateDraftChecklist((items) => items.filter((item) => item.id !== itemId)),
+    onMove: (itemId: string, direction: -1 | 1) => updateDraftChecklist((items) => moveChecklistItem(items, itemId, direction)),
+  };
+
+  const saveDraftChecklist = async (taskId: string) => {
+    try {
+      await replaceChecklist(taskId, draftChecklist);
+      return true;
+    } catch (error) {
+      flash(`Task saved, but the checklist could not be saved: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
   };
 
   const saveTask = async (shouldStart: boolean) => {
@@ -865,8 +914,9 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
         description: savedTask.description,
         status: databaseStatus[savedTask.status],
       });
+      const checklistSaved = draftChecklistSource.current.touched ? await saveDraftChecklist(editingId) : true;
       setCreateOpen(false);
-      flash("Task updated.");
+      if (checklistSaved) flash("Task updated.");
       if (shouldStart) await startFocus(savedTask);
       return;
     }
@@ -877,6 +927,7 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
       description: draftDescription.trim() || "No description yet.",
       status: databaseStatus[startAfterCreate ? "in-progress" : draftStatus],
     });
+    const checklistSaved = draftChecklist.length ? await saveDraftChecklist(taskId) : true;
     const task: FlowoTask = {
       id: taskId,
       title,
@@ -893,7 +944,7 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
     setSelectedId(task.id);
     setFilter("active");
     setCreateOpen(false);
-    flash("Task created.");
+    if (checklistSaved) flash("Task created.");
     if (startAfterCreate) await startFocus(task);
   };
 
@@ -1128,6 +1179,10 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
             <span>Description <small>optional</small></span>
             <textarea value={draftDescription} onChange={(event) => setDraftDescription(event.target.value)} placeholder="Add just enough detail to get started" />
           </label>
+          <div className="task-create-form__checklist" role="group" aria-label="Checklist">
+            <span>Checklist <small>optional</small></span>
+            <ChecklistEditor items={draftChecklist} {...draftChecklistHandlers} placeholder="Add a step, then press Enter" addOnBlur />
+          </div>
           <label>
             <span>Initial status</span>
             <select value={draftStatus} onChange={(event) => setDraftStatus(event.target.value as TaskStatus)}>
