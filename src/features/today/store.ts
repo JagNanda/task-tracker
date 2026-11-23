@@ -45,7 +45,8 @@ type TodayActions = {
   extendSession: (minutes: number) => Promise<void>;
   endBreak: () => Promise<void>;
   setQuickCaptureDraft: (value: string) => void;
-  captureTask: (startFocus?: boolean, titleOverride?: string) => Promise<void>;
+  setQuickCaptureTicketNumber: (value: string) => void;
+  captureTask: (startFocus?: boolean, titleOverride?: string, ticketNumberOverride?: string) => Promise<void>;
 };
 
 const emptyState: TodayState & PersistedTimerState = {
@@ -70,6 +71,7 @@ const emptyState: TodayState & PersistedTimerState = {
   recentTasks: [],
   availableTasks: [],
   quickCaptureDraft: "",
+  quickCaptureTicketNumber: "",
   sessionId: null,
   focusedSecondsAtSync: 0,
   focusIntervalOffsetSeconds: 0,
@@ -506,13 +508,15 @@ export const useTodayStore = create<TodayState & PersistedTimerState & TodayActi
     }
   },
   setQuickCaptureDraft: (quickCaptureDraft) => set({ quickCaptureDraft }),
-  captureTask: async (startFocus = false, titleOverride) => {
+  setQuickCaptureTicketNumber: (quickCaptureTicketNumber) => set({ quickCaptureTicketNumber }),
+  captureTask: async (startFocus = false, titleOverride, ticketNumberOverride) => {
     const title = (titleOverride ?? get().quickCaptureDraft).trim();
+    const ticketNumber = titleOverride === undefined ? get().quickCaptureTicketNumber : ticketNumberOverride;
     if (!title) return;
     const settings = await settingsService.all();
     const shouldStart = startFocus || settings["tasks.startFocusAfterCreate"];
-    const id = await taskRepository.create({ title, context: "Quick Capture / Unsorted", status: shouldStart ? "in_progress" : settings["tasks.defaultStatus"] === "in_progress" ? "in_progress" : "todo" });
-    if (titleOverride === undefined) set({ quickCaptureDraft: "" });
+    const id = await taskRepository.create({ title, ticketNumber, context: "Quick Capture / Unsorted", status: shouldStart ? "in_progress" : settings["tasks.defaultStatus"] === "in_progress" ? "in_progress" : "todo" });
+    if (titleOverride === undefined) set({ quickCaptureDraft: "", quickCaptureTicketNumber: "" });
     const dashboard = await dashboardPatch();
     set(dashboard);
     if (shouldStart) {

@@ -5,6 +5,8 @@ import { useTodayStore } from "./store";
 export function QuickCapture() {
   const draft = useTodayStore((state) => state.quickCaptureDraft);
   const setDraft = useTodayStore((state) => state.setQuickCaptureDraft);
+  const ticketNumber = useTodayStore((state) => state.quickCaptureTicketNumber);
+  const setTicketNumber = useTodayStore((state) => state.setQuickCaptureTicketNumber);
   const captureTask = useTodayStore((state) => state.captureTask);
   const interrupt = useTodayStore((state) => state.interrupt);
   const mode = useTodayStore((state) => state.mode);
@@ -14,13 +16,16 @@ export function QuickCapture() {
   return (
     <form className={`quick-action-bar ${activeSession ? "is-switching" : ""}`} aria-label={activeSession ? "Create a task and switch focus" : "Quick capture a task"} onSubmit={(event) => { event.preventDefault(); void captureTask(true); }}>
       <div className="quick-action-bar__label">{activeSession ? <Repeat2 size={18} /> : <Zap size={18} fill="currentColor" />}<strong>{activeSession ? "Quick Switch" : "Quick Capture"}</strong><kbd>Ctrl K</kbd></div>
-      <Input
-        id="quick-capture-input"
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        placeholder={activeSession ? "New task to switch to…" : "What do you want to work on?"}
-        aria-label={activeSession ? "Name a new task and switch to it" : "What do you want to work on?"}
-      />
+      <div className="quick-action-bar__inputs">
+        <Input
+          id="quick-capture-input"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder={activeSession ? "New task to switch to…" : "What do you want to work on?"}
+          aria-label={activeSession ? "Name a new task and switch to it" : "What do you want to work on?"}
+        />
+        <Input aria-label="Ticket number (optional)" placeholder="Ticket number" value={ticketNumber} onChange={(event) => setTicketNumber(event.target.value)} />
+      </div>
       <Button tone="primary" type="submit" disabled={!draft.trim()}>{activeSession ? <Repeat2 size={15} /> : <Play size={15} fill="currentColor" />} {activeSession ? "Create & Switch" : "Create & Focus"}</Button>
       <Button type="button" onClick={openTaskPicker}><ListChecks size={15} /> Choose Existing</Button>
       <Button type="button" onClick={interrupt} disabled={mode !== "focusing"}><Zap size={15} fill="currentColor" /> Interrupt</Button>

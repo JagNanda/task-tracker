@@ -30,6 +30,7 @@ INSERT INTO app_settings (key, value_json, updated_at) VALUES
     ('reports.includeBreaks', 'false', 0),
     ('reports.defaultPeriod', '"today"', 0),
     ('reports.detail', '"concise"', 0),
+    ('reports.dailyReminder', 'true', 0),
     ('desktop.launchAtStartup', 'false', 0),
     ('desktop.closeBehavior', '"tray"', 0),
     ('desktop.minimizeToTray', 'false', 0),

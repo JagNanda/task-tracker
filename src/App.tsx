@@ -10,6 +10,7 @@ import { useTodayStore } from "./features/today/store";
 import { ReminderScheduler } from "./features/reminders/ReminderScheduler";
 import { FocusExpiryDialog } from "./features/today/FocusExpiryDialog";
 import { isDesktopRuntime } from "./data/database";
+import { localDateKey } from "./features/timeline/timelineStore";
 
 type Page = "Today" | "Tasks" | "Timeline" | "Reports" | "Insights" | "Settings";
 
@@ -26,6 +27,7 @@ function pageFromPath(): Page {
 export default function App() {
   const [page, setPage] = useState<Page>(pageFromPath);
   const [ready, setReady] = useState(false);
+  const [quickAddDate, setQuickAddDate] = useState<string | null>(null);
   const tick = useTodayStore((state) => state.tick);
 
   useEffect(() => {
@@ -66,9 +68,14 @@ export default function App() {
     setPage("Tasks");
   }, []);
 
+  const openReportQuickAdd = () => {
+    setPage("Reports");
+    setQuickAddDate((date) => date ?? localDateKey());
+  };
+
   const content = page === "Today" ? <TodayPage onNavigate={navigate} />
     : page === "Timeline" ? <TimelinePage onNavigate={navigate} />
-      : page === "Reports" ? <ReportsPage onNavigate={navigate} />
+      : page === "Reports" ? <ReportsPage onNavigate={navigate} quickAddDate={quickAddDate} onOpenQuickAdd={openReportQuickAdd} onCloseQuickAdd={() => setQuickAddDate(null)} />
         : page === "Insights" ? <InsightsPage onNavigate={navigate} />
           : page === "Settings" ? <SettingsPage onNavigate={navigate} />
             : <TasksPage onNavigate={navigate} />;
@@ -76,6 +83,6 @@ export default function App() {
   return <>
     {content}
     <FocusExpiryDialog />
-    <ReminderScheduler enabled={ready && isDesktopRuntime()} onOpenTask={openReminderTask} />
+    <ReminderScheduler enabled={ready && isDesktopRuntime()} onOpenTask={openReminderTask} onOpenReport={openReportQuickAdd} />
   </>;
 }

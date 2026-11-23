@@ -156,6 +156,7 @@ function TaskPicker({ open, onClose, preserveSession = false }: { open: boolean;
   const captureTask = useTodayStore((state) => state.captureTask);
   const refreshDashboard = useTodayStore((state) => state.refreshDashboard);
   const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [ticketNumber, setTicketNumber] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
   const [loadingTasks, setLoadingTasks] = useState(true);
@@ -165,6 +166,7 @@ function TaskPicker({ open, onClose, preserveSession = false }: { open: boolean;
     if (!open) return;
     let current = true;
     setNewTaskTitle("");
+    setTicketNumber("");
     setCreateError("");
     setLoadingTasks(true);
     setTaskLoadError("");
@@ -185,7 +187,7 @@ function TaskPicker({ open, onClose, preserveSession = false }: { open: boolean;
     setCreating(true);
     setCreateError("");
     try {
-      await captureTask(true, title);
+      await captureTask(true, title, ticketNumber);
       setNewTaskTitle("");
       onClose();
     } catch (error) {
@@ -200,7 +202,11 @@ function TaskPicker({ open, onClose, preserveSession = false }: { open: boolean;
       <p className="modal-description">{preserveSession ? "Switch to an existing task or create something new without ending this focus session." : "Choose an existing task or create the task you want to focus on."}</p>
       <form className="task-picker-create" onSubmit={(event) => { event.preventDefault(); void createAndUseTask(); }}>
         <label htmlFor="switch-new-task">Create a new task</label>
-        <div><Input id="switch-new-task" value={newTaskTitle} onChange={(event) => { setNewTaskTitle(event.target.value); if (createError) setCreateError(""); }} placeholder="What are you switching to?" autoComplete="off" /><Button tone="primary" type="submit" disabled={creating || !newTaskTitle.trim()}><Plus size={15} /> {creating ? "Creating…" : preserveSession ? "Create & Switch" : "Create & Focus"}</Button></div>
+        <div>
+          <Input id="switch-new-task" value={newTaskTitle} onChange={(event) => { setNewTaskTitle(event.target.value); if (createError) setCreateError(""); }} placeholder="What are you switching to?" autoComplete="off" />
+          <Input aria-label="Ticket number (optional)" placeholder="Ticket number" value={ticketNumber} onChange={(event) => setTicketNumber(event.target.value)} />
+          <Button tone="primary" type="submit" disabled={creating || !newTaskTitle.trim()}><Plus size={15} /> {creating ? "Creating…" : preserveSession ? "Create & Switch" : "Create & Focus"}</Button>
+        </div>
         <small>Saved to Quick Capture / Unsorted. You can organize it later.</small>
         {createError && <small className="task-picker-create__error" role="alert">{createError}</small>}
       </form>

@@ -38,7 +38,7 @@ import {
 } from "./NoteComposerModal";
 import { NotesViewerModal } from "./NotesViewerModal";
 import { type TaskNote, useTaskNotesStore } from "./notesStore";
-import { databaseStatus, useTaskStore } from "./taskStore";
+import { databaseStatus, taskLabel, useTaskStore } from "./taskStore";
 import { type ChecklistItem, moveChecklistItem, useChecklistStore } from "./checklistStore";
 import { ChecklistEditor, TaskChecklistCard } from "./TaskChecklist";
 import { createId } from "../../data/database";
@@ -70,6 +70,7 @@ type NoteComposerState = {
 export type FlowoTask = {
   id: string;
   title: string;
+  ticketNumber?: string;
   context: string;
   description: string;
   status: TaskStatus;
@@ -390,7 +391,7 @@ function TaskRow({
     >
       <span className="task-row__status" aria-label={statusLabels[task.status]}>{statusIcon(task.status)}</span>
       <span className="task-row__name">
-        <button className="task-row__title" type="button" onClick={onSelect}>{task.title}</button>
+        <button className="task-row__title" type="button" onClick={onSelect}>{taskLabel(task)}</button>
         {Boolean(task.checklistTotal) && (
           <span
             className={`task-row__checklist ${task.checklistDone === task.checklistTotal ? "is-complete" : ""}`}
@@ -543,7 +544,7 @@ export function TaskDetailsPopup({
         <header className="task-details-popup__header">
           <div className="task-details-popup__heading">
             <span className={`task-details-popup__dot task-details-popup__dot--${task.status}`} />
-            <h2 id="task-details-title">{task.title}</h2>
+            <h2 id="task-details-title">{taskLabel(task)}</h2>
             <IconButton label="Edit task" onClick={() => onAction("Edit")}><Pencil size={17} /></IconButton>
           </div>
           <IconButton className="task-details-popup__close" label="Close task details" onClick={onClose}><X size={20} /></IconButton>
@@ -645,6 +646,7 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
   const [reminderTaskId, setReminderTaskId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
+  const [draftTicketNumber, setDraftTicketNumber] = useState("");
   const [draftContext, setDraftContext] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
   const [draftStatus, setDraftStatus] = useState<TaskStatus>("todo");
@@ -798,7 +800,7 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
     return tasksWithNoteCounts
       .filter(matchesFilter)
       .filter((task) => reminderFilter === "all" || (reminderFilter === "has-reminder" ? Boolean(task.reminder) : Boolean(task.reminder && task.reminder.sortValue <= 1440)))
-      .filter((task) => !normalizedQuery || `${task.title} ${task.context} ${task.description}`.toLowerCase().includes(normalizedQuery))
+      .filter((task) => !normalizedQuery || `${task.title} ${task.ticketNumber ?? ""} ${task.context} ${task.description}`.toLowerCase().includes(normalizedQuery))
       .sort(compare);
   }, [filter, query, reminderFilter, sort, tasksWithNoteCounts]);
 
@@ -817,7 +819,7 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
       } catch (error) {
         flash(error instanceof Error ? error.message : String(error));
       }
-      return;
+      return false;
     }
     const switching = Boolean(activeFocusId);
     try {
@@ -829,10 +831,16 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
         duration: formatMinutes(task.totalMinutes),
         color: "var(--blue)",
       });
+      if (useTodayStore.getState().currentTask?.id !== task.id) {
+        flash("Focus could not start. Try again from the task.");
+        return false;
+      }
       setSelectedId(task.id);
       flash(switching ? `Switched focus to ${task.title}.` : `Focus started on ${task.title}.`);
+      return true;
     } catch (error) {
       flash(error instanceof Error ? error.message : String(error));
+      return false;
     }
   };
 
@@ -849,6 +857,7 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
   const openCreate = () => {
     setEditingId(null);
     setDraftTitle("");
+    setDraftTicketNumber("");
     setDraftContext("");
     setDraftDescription("");
     setDraftStatus(taskPreferences.defaultStatus === "in_progress" ? "in-progress" : "todo");
@@ -860,6 +869,7 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
   const openEdit = (task: FlowoTask) => {
     setEditingId(task.id);
     setDraftTitle(task.title);
+    setDraftTicketNumber(task.ticketNumber ?? "");
     setDraftContext(task.context);
     setDraftDescription(task.description);
     setDraftStatus(task.status);
@@ -897,6 +907,7 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
 
   const saveTask = async (shouldStart: boolean) => {
     const title = draftTitle.trim();
+    const ticketNumber = draftTicketNumber.trim();
     if (!title) return;
     if (editingId) {
       const existingTask = tasks.find((task) => task.id === editingId);
@@ -904,12 +915,14 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
       const savedTask: FlowoTask = {
         ...existingTask,
         title,
+        ticketNumber: ticketNumber || undefined,
         context: draftContext.trim() || "Unsorted / General",
         description: draftDescription.trim() || "No description yet.",
         status: draftStatus,
       };
       await updatePersistentTask(editingId, {
         title: savedTask.title,
+        ticketNumber,
         context: savedTask.context,
         description: savedTask.description,
         status: databaseStatus[savedTask.status],
@@ -923,6 +936,7 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
     const startAfterCreate = shouldStart || taskPreferences.startFocusAfterCreate;
     const taskId = await createPersistentTask({
       title,
+      ticketNumber,
       context: draftContext.trim() || "Unsorted / General",
       description: draftDescription.trim() || "No description yet.",
       status: databaseStatus[startAfterCreate ? "in-progress" : draftStatus],
@@ -931,6 +945,7 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
     const task: FlowoTask = {
       id: taskId,
       title,
+      ticketNumber: ticketNumber || undefined,
       context: draftContext.trim() || "Unsorted / General",
       description: draftDescription.trim() || "No description yet.",
       status: startAfterCreate ? "in-progress" : draftStatus,
@@ -945,7 +960,7 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
     setFilter("active");
     setCreateOpen(false);
     if (checklistSaved) flash("Task created.");
-    if (startAfterCreate) await startFocus(task);
+    if (startAfterCreate && await startFocus(task)) onNavigate?.("Today");
   };
 
   const performAction = async (task: FlowoTask, action: string) => {
@@ -1171,10 +1186,16 @@ export function TasksPage({ onNavigate }: { onNavigate?: (label: string) => void
             <span>Task name</span>
             <Input autoFocus value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="What needs to be done?" />
           </label>
-          <label>
-            <span>Context <small>optional</small></span>
-            <Input value={draftContext} onChange={(event) => setDraftContext(event.target.value)} placeholder="e.g. Backend / Auth service" />
-          </label>
+          <div className="task-create-form__split">
+            <label>
+              <span>Ticket number <small>optional</small></span>
+              <Input value={draftTicketNumber} onChange={(event) => setDraftTicketNumber(event.target.value)} placeholder="e.g. PROJ-123" />
+            </label>
+            <label>
+              <span>Context <small>optional</small></span>
+              <Input value={draftContext} onChange={(event) => setDraftContext(event.target.value)} placeholder="e.g. Backend / Auth service" />
+            </label>
+          </div>
           <label>
             <span>Description <small>optional</small></span>
             <textarea value={draftDescription} onChange={(event) => setDraftDescription(event.target.value)} placeholder="Add just enough detail to get started" />

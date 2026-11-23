@@ -6,6 +6,7 @@ export type TaskStatus = "todo" | "in_progress" | "blocked" | "completed" | "can
 export type TaskRecord = {
   id: string;
   title: string;
+  ticket_number: string | null;
   description: string | null;
   context: string | null;
   status: TaskStatus;
@@ -28,6 +29,7 @@ export type TaskRecord = {
 export type SaveTaskInput = {
   id?: string;
   title: string;
+  ticketNumber?: string;
   description?: string;
   context?: string;
   status?: TaskStatus;
@@ -62,9 +64,9 @@ export const taskRepository = {
     const now = nowUtcMs();
     const id = input.id ?? createId("task");
     await execute(
-      `INSERT INTO tasks (id, title, description, context, status, created_at, updated_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)`,
-      [id, input.title.trim(), input.description?.trim() || null, input.context?.trim() || null, input.status ?? "todo", now],
+      `INSERT INTO tasks (id, title, description, context, status, created_at, updated_at, ticket_number)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7)`,
+      [id, input.title.trim(), input.description?.trim() || null, input.context?.trim() || null, input.status ?? "todo", now, input.ticketNumber?.trim() || null],
     );
     return id;
   },
@@ -75,8 +77,9 @@ export const taskRepository = {
          completed_at = CASE WHEN ?5 = 'completed' THEN COALESCE(completed_at, ?6) ELSE NULL END,
          cancelled_at = CASE WHEN ?5 = 'cancelled' THEN COALESCE(cancelled_at, ?6) ELSE NULL END,
          archived_at = CASE WHEN ?5 = 'archived' THEN COALESCE(archived_at, ?6) ELSE NULL END,
+         ticket_number = CASE WHEN ?7 IS NULL THEN ticket_number ELSE NULLIF(?7, '') END,
          updated_at = ?6 WHERE id = ?1`,
-      [id, input.title.trim(), input.description?.trim() || null, input.context?.trim() || null, input.status ?? "todo", nowUtcMs()],
+      [id, input.title.trim(), input.description?.trim() || null, input.context?.trim() || null, input.status ?? "todo", nowUtcMs(), input.ticketNumber?.trim() ?? null],
     );
   },
 

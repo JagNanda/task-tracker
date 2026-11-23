@@ -2,6 +2,10 @@ import { create } from "zustand";
 import { taskRepository, type SaveTaskInput, type TaskRecord, type TaskStatus as DatabaseTaskStatus } from "../../data/repositories/taskRepository";
 import type { FlowoTask, TaskStatus } from "./TasksPage";
 
+export function taskLabel(task: Pick<FlowoTask, "title" | "ticketNumber">) {
+  return task.ticketNumber ? `${task.ticketNumber} · ${task.title}` : task.title;
+}
+
 const uiStatus: Record<DatabaseTaskStatus, TaskStatus> = {
   todo: "todo",
   in_progress: "in-progress",
@@ -35,6 +39,7 @@ function toFlowoTask(task: TaskRecord): FlowoTask {
   return {
     id: task.id,
     title: task.title,
+    ticketNumber: task.ticket_number ?? undefined,
     context: task.context || "Unsorted / General",
     description: task.description || "No description yet.",
     status: uiStatus[task.status],

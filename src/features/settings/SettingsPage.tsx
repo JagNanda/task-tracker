@@ -300,6 +300,7 @@ function ReportSettings({ values, update }: SectionProps) {
     <SettingsSection title="Reports" description="Set defaults for newly generated reports. Saved reports remain unchanged.">
       <div className="setting-group">
         {toggles.map(([key, label]) => <ToggleRow key={key} title={label} checked={Boolean(values[key])} onChange={(value) => void update(key, value as never)} />)}
+        <ToggleRow title="Daily report reminder" description="Get a reminder at 5:00 p.m. local time to log any missed work." checked={values["reports.dailyReminder"]} onChange={(value) => void update("reports.dailyReminder", value)} />
         <SettingRow title="When opening Reports"><NativeSelect label="When opening Reports" value={values["reports.defaultPeriod"]} options={[{ value: "today", label: "Today" }, { value: "last", label: "Last-used period" }]} onChange={(value) => void update("reports.defaultPeriod", value)} /></SettingRow>
         <SettingRow title="Report detail"><NativeSelect label="Report detail" value={values["reports.detail"]} options={[{ value: "concise", label: "Concise" }, { value: "detailed", label: "Detailed" }]} onChange={(value) => void update("reports.detail", value)} /></SettingRow>
       </div>

@@ -3,14 +3,14 @@ import { reportRepository, type SavedReportRecord } from "../../data/repositorie
 
 export type ReportPeriod = "day" | "week" | "month";
 
-export type SavedReport = {
+type DateReportScope = { period: ReportPeriod; anchorDate: string; options?: Record<string, boolean> };
+type TicketReportScope = { period: "ticket"; ticketNumber: string };
+
+export type SavedReport = (DateReportScope | TicketReportScope) & {
   id: string;
-  period: ReportPeriod;
   periodLabel: string;
-  anchorDate: string;
   html: string;
   savedAt: string;
-  options?: Record<string, boolean>;
 };
 
 function dateKey(timestamp: number) {
@@ -23,18 +23,24 @@ function label(period: ReportPeriod, timestamp: number) {
 }
 
 function fromRecord(report: SavedReportRecord): SavedReport {
-  return {
+  const snapshot = {
     id: report.id,
+    html: report.content,
+    savedAt: new Date(report.created_at).toISOString(),
+  };
+  if (report.period_type === "ticket") {
+    return { ...snapshot, period: "ticket", ticketNumber: report.ticket_number, periodLabel: report.ticket_number };
+  }
+  return {
+    ...snapshot,
     period: report.period_type,
     periodLabel: label(report.period_type, report.period_start),
     anchorDate: dateKey(report.period_start),
-    html: report.content,
-    savedAt: new Date(report.created_at).toISOString(),
     options: JSON.parse(report.options_json) as Record<string, boolean>,
   };
 }
 
-function bounds(report: SavedReport) {
+function bounds(report: DateReportScope) {
   const [year, month, day] = report.anchorDate.split("-").map(Number);
   const start = report.period === "month" ? new Date(year, month - 1, 1) : new Date(year, month - 1, day);
   const end = new Date(start);
@@ -56,15 +62,21 @@ export const useReportStore = create<ReportStore>((set, get) => ({
   loaded: false,
   load: async () => set({ reports: (await reportRepository.list()).map(fromRecord), loaded: true }),
   saveReport: async (report) => {
-    const period = bounds(report);
-    await reportRepository.save({
-      id: report.id,
-      periodType: report.period,
-      periodStart: period.start,
-      periodEnd: period.end,
-      options: report.options ?? {},
-      content: report.html,
-    });
+    const snapshot = { id: report.id, content: report.html };
+    if (report.period === "ticket") {
+      await reportRepository.save({
+        ...snapshot,
+        scope: { period_type: "ticket", period_start: null, period_end: null, ticket_number: report.ticketNumber },
+        options: {},
+      });
+    } else {
+      const dates = bounds(report);
+      await reportRepository.save({
+        ...snapshot,
+        scope: { period_type: report.period, period_start: dates.start, period_end: dates.end, ticket_number: null },
+        options: report.options ?? {},
+      });
+    }
     await get().load();
   },
   deleteReport: async (id) => {

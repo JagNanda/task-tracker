@@ -1,4 +1,4 @@
-import { BellRing, Clock3, ExternalLink } from "lucide-react";
+import { BellRing, Clock3, ExternalLink, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   isPermissionGranted,
@@ -6,18 +6,22 @@ import {
   sendNotification,
   type Options as NotificationOptions,
 } from "@tauri-apps/plugin-notification";
-import { Button, Modal, Pill } from "../../cdk";
+import { Button, IconButton, Modal, Pill } from "../../cdk";
 import {
   taskReminderRepository,
   type DueTaskReminderRecord,
 } from "../../data/repositories/taskReminderRepository";
 import { settingsService } from "../../data/services/settingsService";
+import { reportRepository } from "../../data/repositories/reportRepository";
 import { playCompletionSound } from "../../audio/completionSounds";
 import { useTaskStore } from "../tasks/taskStore";
 import { useTodayStore } from "../today/store";
 import type { SettingsState } from "../settings/settingsDefaults";
+import { localDateKey } from "../timeline/timelineStore";
 
 type ReminderOpenBehavior = "popup" | "tasks";
+const reportReminderTitle = "End-of-day report";
+const reportReminderBody = "Add any work you forgot to log today.";
 
 function snoozedUntil(option: string) {
   const now = new Date();
@@ -45,13 +49,17 @@ function notificationExtra(notification: NotificationOptions) {
 export function ReminderScheduler({
   enabled,
   onOpenTask,
+  onOpenReport,
 }: {
   enabled: boolean;
   onOpenTask: (taskId: string, behavior: ReminderOpenBehavior) => void;
+  onOpenReport: () => void;
 }) {
   const [queue, setQueue] = useState<DueTaskReminderRecord[]>([]);
   const [preferences, setPreferences] = useState<SettingsState | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reportReminderDate, setReportReminderDate] = useState<string | null>(null);
+  const lastReportReminderCheck = useRef<string | null>(null);
   const checking = useRef(false);
   const current = queue[0] ?? null;
 
@@ -66,8 +74,25 @@ export function ReminderScheduler({
     try {
       const settings = await settingsService.all();
       setPreferences(settings);
-      if (!settings["notifications.reminders"]) return;
       if (document.hidden && !settings["desktop.keepRemindersInTray"]) return;
+      const now = new Date();
+      const date = localDateKey(now);
+      setReportReminderDate((shownDate) => settings["reports.dailyReminder"] && shownDate === date ? shownDate : null);
+      if (settings["reports.dailyReminder"] && now.getHours() >= 17 && lastReportReminderCheck.current !== date) {
+        try {
+          const claimed = await reportRepository.claimDailyReminder(date);
+          lastReportReminderCheck.current = date;
+          if (claimed) {
+            setReportReminderDate(date);
+            if (await isPermissionGranted().catch(() => false)) {
+              sendNotification({ title: reportReminderTitle, body: `${reportReminderBody} Open Reports and select Quick Add Today.` });
+            }
+          }
+        } catch (error) {
+          console.error("Failed to check the daily report reminder", error);
+        }
+      }
+      if (!settings["notifications.reminders"]) return;
       const due = await taskReminderRepository.listDue();
       if (!due.length) return;
       const firedAt = Date.now();
@@ -161,24 +186,32 @@ export function ReminderScheduler({
   const defaultChoice = preferences?.["reminders.defaultSnooze"] ?? "15m";
 
   return (
-    <Modal open={Boolean(current)} title="Task reminder" onClose={() => void dismiss()} className="due-reminder-modal">
-      {current && <div className="due-reminder">
-        <span className="due-reminder__icon"><BellRing size={24} /></span>
-        <div className="due-reminder__copy">
-          <h3>{current.task_title}</h3>
-          <p>{current.message || "You asked to be reminded about this task."}</p>
-          <small><Clock3 size={13} /> Due {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(current.scheduled_for))}</small>
-        </div>
-        {queue.length > 1 && <span className="due-reminder__queue">{queue.length - 1} more</span>}
-        <div className="due-reminder__snooze">
-          <span>Snooze for</span>
-          <div>{choices.map((choice) => <Pill key={choice} selected={choice === defaultChoice} disabled={busy} onClick={() => void snooze(choice)}>{snoozeLabel(choice)}</Pill>)}</div>
-        </div>
-        <div className="modal-actions">
-          <Button disabled={busy} onClick={() => void dismiss()}>Dismiss</Button>
-          <Button tone="primary" disabled={busy} onClick={() => void openTask()}><ExternalLink size={15} /> Open task</Button>
-        </div>
-      </div>}
-    </Modal>
+    <>
+      {reportReminderDate && <aside className="report-reminder" aria-label={reportReminderTitle}>
+        <BellRing size={20} aria-hidden="true" />
+        <div role="status"><strong>{reportReminderTitle}</strong><p>{reportReminderBody}</p></div>
+        <Button size="sm" tone="primary" onClick={() => { setReportReminderDate(null); onOpenReport(); }}>Quick Add</Button>
+        <IconButton label="Dismiss report reminder" onClick={() => setReportReminderDate(null)}><X size={16} /></IconButton>
+      </aside>}
+      <Modal open={Boolean(current)} title="Task reminder" onClose={() => void dismiss()} className="due-reminder-modal">
+        {current && <div className="due-reminder">
+          <span className="due-reminder__icon"><BellRing size={24} /></span>
+          <div className="due-reminder__copy">
+            <h3>{current.task_title}</h3>
+            <p>{current.message || "You asked to be reminded about this task."}</p>
+            <small><Clock3 size={13} /> Due {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(current.scheduled_for))}</small>
+          </div>
+          {queue.length > 1 && <span className="due-reminder__queue">{queue.length - 1} more</span>}
+          <div className="due-reminder__snooze">
+            <span>Snooze for</span>
+            <div>{choices.map((choice) => <Pill key={choice} selected={choice === defaultChoice} disabled={busy} onClick={() => void snooze(choice)}>{snoozeLabel(choice)}</Pill>)}</div>
+          </div>
+          <div className="modal-actions">
+            <Button disabled={busy} onClick={() => void dismiss()}>Dismiss</Button>
+            <Button tone="primary" disabled={busy} onClick={() => void openTask()}><ExternalLink size={15} /> Open task</Button>
+          </div>
+        </div>}
+      </Modal>
+    </>
   );
 }

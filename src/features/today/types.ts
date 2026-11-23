@@ -48,4 +48,5 @@ export interface TodayState {
   recentTasks: Task[];
   availableTasks: Task[];
   quickCaptureDraft: string;
+  quickCaptureTicketNumber: string;
 }

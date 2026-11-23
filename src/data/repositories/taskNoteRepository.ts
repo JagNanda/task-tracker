@@ -5,6 +5,7 @@ export type TaskNoteRecord = {
   id: string;
   taskId: string;
   body: string;
+  reportDate: string | null;
   createdAt: number;
   updatedAt: number;
   attachments: Array<NoteAttachment & {
@@ -20,7 +21,7 @@ export const taskNoteRepository = {
     return invoke<TaskNoteRecord[]>("database_list_task_notes", { taskId });
   },
 
-  save(input: { id: string; taskId: string; body: string; attachments: NoteAttachment[] }) {
+  save(input: { id: string; taskId: string; body: string; attachments: NoteAttachment[]; reportDate?: string }) {
     return invoke<TaskNoteRecord[]>("database_save_task_note", {
       input: { ...input, now: Date.now() },
     });

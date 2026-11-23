@@ -52,6 +52,16 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "task checklists",
         include_str!("../migrations/007_task_checklists.sql"),
     ),
+    (
+        8,
+        "report work notes and ticket numbers",
+        include_str!("../migrations/008_report_work_notes.sql"),
+    ),
+    (
+        9,
+        "ticket reports",
+        include_str!("../migrations/009_ticket_reports.sql"),
+    ),
 ];
 const DEFAULT_SETTINGS_SQL: &str = include_str!("../sql/default_settings.sql");
 const RESET_THEME_SQL: &str = "
@@ -145,6 +155,7 @@ pub struct SaveTaskNoteInput {
     pub id: String,
     pub task_id: String,
     pub body: String,
+    pub report_date: Option<String>,
     pub attachments: Vec<NoteAttachmentInput>,
     pub now: i64,
 }
@@ -168,6 +179,7 @@ pub struct TaskNoteRecord {
     id: String,
     task_id: String,
     body: String,
+    report_date: Option<String>,
     created_at: i64,
     updated_at: i64,
     attachments: Vec<NoteAttachmentRecord>,
@@ -872,7 +884,7 @@ fn load_task_notes(
 ) -> Result<Vec<TaskNoteRecord>, String> {
     let mut note_statement = connection
         .prepare(
-            "SELECT id, task_id, body, created_at, updated_at\n\
+            "SELECT id, task_id, body, created_at, updated_at, report_date\n\
                FROM task_notes WHERE task_id = ?1 ORDER BY created_at DESC",
         )
         .map_err(|error| error.to_string())?;
@@ -884,6 +896,7 @@ fn load_task_notes(
                 body: row.get(2)?,
                 created_at: row.get(3)?,
                 updated_at: row.get(4)?,
+                report_date: row.get(5)?,
                 attachments: Vec::new(),
             })
         })
@@ -1035,10 +1048,10 @@ pub fn database_save_task_note(
             .map_err(|error| error.to_string())?;
         transaction
             .execute(
-                "INSERT INTO task_notes (id, task_id, body, created_at, updated_at)\n\
-                 VALUES (?1, ?2, ?3, ?4, ?4)\n\
+                "INSERT INTO task_notes (id, task_id, body, created_at, updated_at, report_date)\n\
+                 VALUES (?1, ?2, ?3, ?4, ?4, ?5)\n\
                  ON CONFLICT(id) DO UPDATE SET task_id = excluded.task_id, body = excluded.body, updated_at = excluded.updated_at",
-                params![input.id, input.task_id, input.body.trim(), input.now],
+                params![input.id, input.task_id, input.body.trim(), input.now, input.report_date],
             )
             .map_err(|error| error.to_string())?;
         transaction

@@ -30,6 +30,7 @@ export const defaultSettings = {
   "reports.includeBreaks": false,
   "reports.defaultPeriod": "today",
   "reports.detail": "concise",
+  "reports.dailyReminder": true,
   "desktop.launchAtStartup": false,
   "desktop.closeBehavior": "tray",
   "desktop.minimizeToTray": false,

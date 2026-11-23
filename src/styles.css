@@ -1425,13 +1425,15 @@ kbd {
 
 .quick-action-bar__label svg { color: #bfe0ff; }
 .quick-action-bar__label strong { font-size: 12px; }
+.quick-action-bar__inputs { display: grid; grid-template-columns: minmax(0, 1fr) 105px; gap: 8px; }
+.quick-action-bar__inputs .cdk-input { min-width: 0; }
 .quick-action-bar .cdk-button { min-height: 40px; font-size: 12px; }
 .quick-action-bar.is-switching { border-color: var(--accent-border); }
 .quick-action-bar.is-switching .quick-action-bar__label svg { color: var(--blue-hover); }
 
 .task-picker-create { display: grid; gap: 8px; margin-bottom: 15px; padding: 13px; border: 1px solid var(--accent-border); border-radius: 9px; background: var(--accent-subtle); }
 .task-picker-create > label { color: var(--text); font-size: 11px; font-weight: 600; }
-.task-picker-create > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.task-picker-create > div { display: grid; grid-template-columns: minmax(0, 1fr) 105px auto; gap: 8px; }
 .task-picker-create .cdk-input { min-width: 0; }
 .task-picker-create > small { color: var(--text-3); font-size: 9px; line-height: 1.4; }
 .task-picker-create .task-picker-create__error { color: #ff8888; }
@@ -4095,6 +4097,7 @@ kbd {
 .reports-header h1 { margin: 0 0 7px; font-size: 26px; font-weight: 630; letter-spacing: -0.7px; }
 .reports-header p { margin: 0; color: var(--text-2); font-size: 13px; }
 .reports-header .cdk-button { min-width: 108px; }
+.reports-header__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 
 .report-period-bar {
   flex: 0 0 auto;
@@ -4128,6 +4131,11 @@ kbd {
   gap: 18px;
 }
 .report-date-controls { display: flex; align-items: center; position: relative; }
+.report-ticket-select { min-width: 0; }
+.report-ticket-select select { max-width: 100%; }
+.report-ticket-select:focus-within { border-color: var(--blue); }
+.report-ticket-error { margin: 12px 17px 0; color: #ff8888; font-size: 12px; }
+.report-editor[data-placeholder]:empty::before { content: attr(data-placeholder); color: var(--text-3); }
 .report-date-controls > .cdk-icon-button { width: 39px; height: 39px; border-radius: 7px 0 0 7px; background: #0c1928; }
 .report-date-controls > .cdk-icon-button:nth-of-type(2) { border-radius: 0 7px 7px 0; }
 .report-date-actions { gap: 6px; }
@@ -4318,6 +4326,9 @@ kbd {
 .saved-reports-empty p { margin: 0; }
 
 .report-notice { z-index: 260; min-height: 38px; display: flex; align-items: center; gap: 8px; position: fixed; right: 25px; bottom: 22px; padding: 0 14px; border: 1px solid #286e57; border-radius: 8px; background: #0d2b25; color: #a8f0d0; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35); font-size: 11px; }
+.report-reminder { z-index: 130; display: flex; align-items: center; gap: 12px; position: fixed; right: 24px; bottom: 24px; max-width: calc(100vw - 48px); padding: 12px; border: 1px solid var(--accent-border); border-radius: 8px; background: var(--surface); color: var(--text); box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35); }
+.report-reminder > svg { flex-shrink: 0; color: var(--blue); }
+.report-reminder p { margin: 4px 0 0; color: var(--text-2); font-size: 12px; }
 .report-delete-confirm { border-color: #ad3d34; color: #ffb4a8; background: rgba(121, 35, 28, 0.55); }
 
 .reports-shell--fullscreen .app-sidebar,

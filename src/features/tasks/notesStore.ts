@@ -5,6 +5,7 @@ import type { NoteAttachment } from "./NoteComposerModal";
 export type TaskNote = {
   id: string;
   body: string;
+  reportDate?: string;
   createdAt: string;
   updatedAt: string;
   attachments: NoteAttachment[];
@@ -24,6 +25,7 @@ function toTaskNote(note: TaskNoteRecord): TaskNote {
   return {
     id: note.id,
     body: note.body,
+    reportDate: note.reportDate ?? undefined,
     createdAt: formatTimestamp(note.createdAt),
     updatedAt: formatTimestamp(note.updatedAt),
     attachments: note.attachments.map(({ id, name, mimeType, dataUrl }) => ({ id, name, mimeType, dataUrl })),
@@ -32,25 +34,27 @@ function toTaskNote(note: TaskNoteRecord): TaskNote {
 
 type TaskNotesState = {
   notesByTask: Record<string, TaskNote[]>;
+  loaded: boolean;
   loadTask: (taskId: string) => Promise<void>;
   loadTasks: (taskIds: string[]) => Promise<void>;
-  addNote: (taskId: string, note: TaskNote) => Promise<void>;
+  addNote: (taskId: string, note: Pick<TaskNote, "id" | "body" | "attachments" | "reportDate">) => Promise<void>;
   updateNote: (taskId: string, noteId: string, changes: Pick<TaskNote, "body" | "attachments" | "updatedAt">) => Promise<void>;
   removeNote: (taskId: string, noteId: string) => Promise<void>;
 };
 
 export const useTaskNotesStore = create<TaskNotesState>((set, get) => ({
   notesByTask: {},
+  loaded: false,
   loadTask: async (taskId) => {
     const notes = (await taskNoteRepository.list(taskId)).map(toTaskNote);
     set((state) => ({ notesByTask: { ...state.notesByTask, [taskId]: notes } }));
   },
   loadTasks: async (taskIds) => {
     const entries = await Promise.all(taskIds.map(async (taskId) => [taskId, (await taskNoteRepository.list(taskId)).map(toTaskNote)] as const));
-    set({ notesByTask: Object.fromEntries(entries) });
+    set({ notesByTask: Object.fromEntries(entries), loaded: true });
   },
   addNote: async (taskId, note) => {
-    const notes = await taskNoteRepository.save({ id: note.id, taskId, body: note.body, attachments: note.attachments });
+    const notes = await taskNoteRepository.save({ id: note.id, taskId, body: note.body, attachments: note.attachments, reportDate: note.reportDate });
     set((state) => ({ notesByTask: { ...state.notesByTask, [taskId]: notes.map(toTaskNote) } }));
   },
   updateNote: async (taskId, noteId, changes) => {
